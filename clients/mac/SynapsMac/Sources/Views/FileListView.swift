@@ -104,6 +104,7 @@ public struct FileListView: View {
                                 .fontWeight(isSelected ? .semibold : .regular)
                                 .foregroundColor(isSelected ? .accentColor : .primary)
                                 .lineLimit(1)
+                                .textSelection(.disabled)
                             
                             HStack(spacing: 8) {
                                 Text(item.formattedSize)
