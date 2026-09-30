@@ -113,7 +113,10 @@ public final class LocalCacheStore {
                 mtime = excluded.mtime,
                 sha256 = COALESCE(excluded.sha256, local_files.sha256),
                 last_synced_at = COALESCE(excluded.last_synced_at, local_files.last_synced_at),
-                sync_status = excluded.sync_status,
+                sync_status = CASE
+                    WHEN local_files.sync_status = 'committed' AND excluded.sync_status = 'uncommitted' THEN 'committed'
+                    ELSE excluded.sync_status
+                END,
                 album = COALESCE(excluded.album, local_files.album),
                 is_favorite = excluded.is_favorite;
             """

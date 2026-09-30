@@ -49,9 +49,32 @@ public final class AppViewModel: ObservableObject {
     
     public init() {
         setupPhoneObserver()
+        setupScannerObserver()
         Task {
             await checkNASStatus()
             loadDefaultFolder()
+        }
+    }
+    
+    private func setupScannerObserver() {
+        scanner.onItemsHashed = { [weak self] hashedItems in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let map = Dictionary(uniqueKeysWithValues: hashedItems.compactMap { item -> (String, String)? in
+                    guard let sha = item.sha256 else { return nil }
+                    return (item.originalPath, sha)
+                })
+                for i in 0..<self.fileItems.count {
+                    if let sha = map[self.fileItems[i].originalPath] {
+                        self.fileItems[i].sha256 = sha
+                    }
+                }
+                
+                await self.runPreCheckDeduplication(
+                    items: hashedItems,
+                    sourceId: self.selectedSidebarItem?.sourceId ?? "mac_harsh"
+                )
+            }
         }
     }
     
@@ -182,7 +205,11 @@ public final class AppViewModel: ObservableObject {
     
     public func checkNASStatus() async {
         let online = await nasClient.checkHealth()
+        let wasOffline = !self.nasOnline
         self.nasOnline = online
+        if online && wasOffline && !self.fileItems.isEmpty {
+            await runPreCheckDeduplication(items: self.fileItems, sourceId: selectedSidebarItem?.sourceId ?? "mac_harsh")
+        }
     }
     
     public func loadDefaultFolder() {
