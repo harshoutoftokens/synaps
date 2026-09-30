@@ -438,13 +438,12 @@ public struct PhotoThumbnailCell: View {
             // Item / Folder Name Label
             Text(item.filename)
                 .font(.system(size: max(10, min(12, size * 0.085))))
+                .fontWeight(isSelected ? .medium : .regular)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .truncationMode(.middle)
-                .foregroundColor(isSelected ? .white : (isHovered ? .accentColor : .primary))
-                .padding(.horizontal, isSelected ? 4 : 0)
-                .padding(.vertical, isSelected ? 1 : 0)
-                .background(isSelected ? RoundedRectangle(cornerRadius: 4).fill(Color.accentColor) : nil)
+                .foregroundColor(isSelected ? .accentColor : (isHovered ? .accentColor : .primary))
+                .textSelection(.disabled)
                 .frame(width: size + 16, alignment: .top)
         }
         .contentShape(Rectangle())
