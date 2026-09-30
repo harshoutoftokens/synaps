@@ -162,11 +162,13 @@ public struct FileListView: View {
                                 NSPasteboard.general.setString(sha, forType: .string)
                             }
                         }
-                        if item.syncStatus == .uncommitted {
-                            Button("Sync this file to NAS") {
-                                Task {
-                                    _ = try? await NASClient.shared.uploadFile(item: item, sourceId: item.sourceId)
-                                }
+                        if !viewModel.selectedItemIds.isEmpty && (viewModel.selectedItemIds.contains(item.id) || viewModel.selectedItemIds.count > 1) {
+                            Button("Sync Selected (\(viewModel.selectedItemIds.count)) to NAS") {
+                                viewModel.syncSelectedItems()
+                            }
+                        } else if item.syncStatus != .committed {
+                            Button("Sync to NAS") {
+                                viewModel.syncItem(item)
                             }
                         }
                     }

@@ -47,18 +47,35 @@ public struct SyncStatusBar: View {
                 }
             }
             
+            // Sync Selected Action Button
+            if !viewModel.selectedItemIds.isEmpty {
+                Button {
+                    viewModel.syncSelectedItems()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text(viewModel.isSyncing ? "Syncing..." : "Sync Selected (\(viewModel.selectedItemIds.count))")
+                            .fontWeight(.semibold)
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.accentColor)
+                .disabled(viewModel.isSyncing || !viewModel.nasOnline)
+            }
+            
             // Sync Action Button
             Button {
                 viewModel.syncAllUncommitted()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.2.circlepath")
-                    Text(viewModel.isSyncing ? "Syncing..." : "Sync to NAS")
+                    Text(viewModel.isSyncing ? "Syncing..." : "Sync All")
                         .fontWeight(.semibold)
                 }
                 .padding(.horizontal, 8)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .tint(viewModel.uncommittedCount > 0 ? Color.accentColor : Color.secondary)
             .disabled(viewModel.isSyncing || viewModel.uncommittedCount == 0 || !viewModel.nasOnline)
         }

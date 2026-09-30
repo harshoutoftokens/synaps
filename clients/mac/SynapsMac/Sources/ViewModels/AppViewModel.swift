@@ -369,6 +369,78 @@ public final class AppViewModel: ObservableObject {
             return
         }
         
+        startSyncProcess(for: toSync, title: "Committing \(toSync.count) files")
+    }
+    
+    public func syncItem(_ item: SynapsFileItem) {
+        if item.isDirectory {
+            let files = LocalFileScanner.shared.scanDirectoryRecursively(
+                directoryPath: item.originalPath,
+                sourceLocation: item.sourceLocation,
+                sourceId: item.sourceId
+            ).filter { $0.syncStatus != .committed }
+            guard !files.isEmpty else {
+                syncStatusMessage = "All files in folder are already committed"
+                return
+            }
+            startSyncProcess(for: files, title: "Syncing folder \(item.filename)")
+        } else {
+            startSyncProcess(for: [item], title: "Syncing \(item.filename)")
+        }
+    }
+    
+    public func syncSelectedItems() {
+        guard !isSyncing else { return }
+        guard nasOnline else {
+            syncStatusMessage = "Cannot sync: NAS is offline"
+            return
+        }
+        
+        let targets = selectedItems
+        guard !targets.isEmpty else {
+            syncStatusMessage = "No items selected to sync"
+            return
+        }
+        
+        var toSync: [SynapsFileItem] = []
+        var seenPaths = Set<String>()
+        
+        for item in targets {
+            if item.isDirectory {
+                let dirFiles = LocalFileScanner.shared.scanDirectoryRecursively(
+                    directoryPath: item.originalPath,
+                    sourceLocation: item.sourceLocation,
+                    sourceId: item.sourceId
+                ).filter { $0.syncStatus != .committed }
+                for f in dirFiles {
+                    if !seenPaths.contains(f.originalPath) {
+                        seenPaths.insert(f.originalPath)
+                        toSync.append(f)
+                    }
+                }
+            } else {
+                if !seenPaths.contains(item.originalPath) && item.syncStatus != .committed {
+                    seenPaths.insert(item.originalPath)
+                    toSync.append(item)
+                }
+            }
+        }
+        
+        guard !toSync.isEmpty else {
+            syncStatusMessage = "Selected items are already committed!"
+            return
+        }
+        
+        startSyncProcess(for: toSync, title: "Syncing \(toSync.count) selected items")
+    }
+    
+    private func startSyncProcess(for toSync: [SynapsFileItem], title: String) {
+        guard !isSyncing else { return }
+        guard nasOnline else {
+            syncStatusMessage = "Cannot sync: NAS is offline"
+            return
+        }
+        
         isSyncing = true
         syncProgress = 0.0
         syncStatusMessage = "Starting sync of \(toSync.count) files..."
@@ -379,10 +451,58 @@ public final class AppViewModel: ObservableObject {
             let startTime = Date()
             var totalBytesUploaded: Int64 = 0
             
-            for (index, item) in toSync.enumerated() {
-                self.syncStatusMessage = "[\(index + 1)/\(total)] Syncing \(item.filename)..."
+            // Step 1: Pre-compute hashes and run batch pre-check deduplication if possible
+            var itemsPendingUpload: [SynapsFileItem] = []
+            var itemsWithSha: [SynapsFileItem] = []
+            
+            for var item in toSync {
+                if item.sha256 == nil || item.sha256?.isEmpty == true {
+                    if let sha = HashEngine.computeSHA256(for: item.originalPath) {
+                        item.sha256 = sha
+                    }
+                }
+                if item.sha256 != nil {
+                    itemsWithSha.append(item)
+                } else {
+                    itemsPendingUpload.append(item)
+                }
+            }
+            
+            if !itemsWithSha.isEmpty {
+                do {
+                    let precheckResp = try await nasClient.batchPreCheck(
+                        sourceId: itemsWithSha.first?.sourceId ?? "mac_harsh",
+                        friendlyName: "MacBook",
+                        platform: "macOS",
+                        items: itemsWithSha
+                    )
+                    
+                    var dedupPaths = Set<String>()
+                    for res in precheckResp.results {
+                        if res.status == "dedup_linked" {
+                            dedupPaths.insert(res.original_path)
+                            cacheStore.markSynced(paths: [res.original_path], status: .committed)
+                            if let idx = fileItems.firstIndex(where: { $0.originalPath == res.original_path }) {
+                                fileItems[idx].syncStatus = .committed
+                            }
+                            uploadedCount += 1
+                        }
+                    }
+                    
+                    for item in itemsWithSha {
+                        if !dedupPaths.contains(item.originalPath) {
+                            itemsPendingUpload.append(item)
+                        }
+                    }
+                } catch {
+                    itemsPendingUpload.append(contentsOf: itemsWithSha)
+                }
+            }
+            
+            // Step 2: Upload remaining files
+            for (index, item) in itemsPendingUpload.enumerated() {
+                self.syncStatusMessage = "[\(uploadedCount + index + 1)/\(total)] Syncing \(item.filename)..."
                 
-                // Mark item as syncing
                 if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
                     fileItems[idx].syncStatus = .syncing
                 }
@@ -412,7 +532,7 @@ public final class AppViewModel: ObservableObject {
                     }
                 }
                 
-                self.syncProgress = Double(index + 1) / Double(total)
+                self.syncProgress = Double(uploadedCount + index + 1) / Double(total)
             }
             
             let elapsed = Date().timeIntervalSince(startTime)
