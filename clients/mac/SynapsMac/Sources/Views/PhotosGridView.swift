@@ -11,9 +11,22 @@ public struct PhotosGridView: View {
     
     public var body: some View {
         VStack(spacing: 0) {
-            // Controls bar (Zoom slider & stats)
-            HStack {
-                Text("\(viewModel.filteredItems.count) Photos & Videos")
+            // Controls bar (Navigation, Zoom slider & stats)
+            HStack(spacing: 12) {
+                if !viewModel.navigationHistory.isEmpty {
+                    Button {
+                        viewModel.navigateBack()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Back")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                
+                Text("\(viewModel.filteredItems.count) \(viewModel.selectedSidebarItem?.isPhone == true ? "Photos & Videos" : "items")")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
@@ -43,26 +56,35 @@ public struct PhotosGridView: View {
                 Spacer()
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("Loading Photos...")
+                    Text("Loading...")
                         .foregroundColor(.secondary)
                 }
                 Spacer()
             } else if viewModel.filteredItems.isEmpty {
                 Spacer()
                 VStack(spacing: 12) {
-                    Image(systemName: "photo.on.rectangle.angled")
+                    Image(systemName: "folder")
                         .font(.system(size: 40))
                         .foregroundColor(.secondary)
-                    Text("No Photos Found")
+                    Text("No Items Found")
                         .font(.headline)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
             } else {
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 10) {
+                    LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(viewModel.filteredItems) { item in
-                            PhotoThumbnailCell(item: item, size: gridSize)
+                            PhotoThumbnailCell(item: item, size: gridSize) {
+                                if item.isDirectory {
+                                    viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
+                                } else {
+                                    let url = URL(fileURLWithPath: item.originalPath)
+                                    if FileManager.default.fileExists(atPath: item.originalPath) {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding(14)
@@ -75,6 +97,7 @@ public struct PhotosGridView: View {
 public struct PhotoThumbnailCell: View {
     public let item: SynapsFileItem
     public let size: CGFloat
+    public var onDoubleClick: (() -> Void)? = nil
     @State private var nsImage: NSImage?
     @State private var isHovered = false
     
@@ -167,6 +190,9 @@ public struct PhotoThumbnailCell: View {
                 .frame(width: size + 16, alignment: .top)
         }
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            onDoubleClick?()
+        }
         .onHover { isHovered = $0 }
         .onAppear {
             loadThumbnail()
