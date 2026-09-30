@@ -32,6 +32,20 @@ public struct SyncStatusBar: View {
             
             Spacer()
             
+            // Activity Log Button
+            Button {
+                viewModel.showActivityLog = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text("Activity")
+                        .font(.caption)
+                }
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(.secondary)
+            .help("View NAS sync and discovery activity log")
+            
             // Sync progress bar & speed gauge
             if viewModel.isSyncing {
                 HStack(spacing: 8) {
