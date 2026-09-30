@@ -262,16 +262,26 @@ public struct PhotosGridView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(viewModel.filteredItems) { item in
-                            PhotoThumbnailCell(item: item, size: gridSize, onDoubleClick: {
-                                if item.isDirectory {
-                                    viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
-                                } else {
-                                    let url = URL(fileURLWithPath: item.originalPath)
-                                    if FileManager.default.fileExists(atPath: item.originalPath) {
-                                        NSWorkspace.shared.open(url)
+                            PhotoThumbnailCell(
+                                item: item,
+                                size: gridSize,
+                                isPicturesSection: false,
+                                isSelected: viewModel.selectedItemIds.contains(item.id),
+                                onToggleSelect: {
+                                    let flags = NSEvent.modifierFlags
+                                    viewModel.handleItemClick(item, commandKey: flags.contains(.command), shiftKey: flags.contains(.shift))
+                                },
+                                onDoubleClick: {
+                                    if item.isDirectory {
+                                        viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
+                                    } else {
+                                        let url = URL(fileURLWithPath: item.originalPath)
+                                        if FileManager.default.fileExists(atPath: item.originalPath) {
+                                            NSWorkspace.shared.open(url)
+                                        }
                                     }
                                 }
-                            })
+                            )
                         }
                     }
                     .padding(14)
@@ -417,14 +427,15 @@ public struct PhotoThumbnailCell: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .truncationMode(.middle)
-                .foregroundColor(isSelected ? .accentColor : (isHovered ? .accentColor : .primary))
+                .foregroundColor(isSelected ? .white : (isHovered ? .accentColor : .primary))
+                .padding(.horizontal, isSelected ? 4 : 0)
+                .padding(.vertical, isSelected ? 1 : 0)
+                .background(isSelected ? RoundedRectangle(cornerRadius: 4).fill(Color.accentColor) : nil)
                 .frame(width: size + 16, alignment: .top)
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if isPicturesSection {
-                onToggleSelect?()
-            }
+            onToggleSelect?()
         }
         .onTapGesture(count: 2) {
             onDoubleClick?()

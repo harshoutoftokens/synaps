@@ -220,12 +220,54 @@ public final class AppViewModel: ObservableObject {
         }
     }
     
+    @Published public var lastSelectedId: String? = nil
+    
+    public var selectedItems: [SynapsFileItem] {
+        return filteredItems.filter { selectedItemIds.contains($0.id) }
+    }
+    
+    public var selectedUrls: [URL] {
+        return selectedItems.compactMap { item -> URL? in
+            if item.originalPath.hasPrefix("iPhone://") {
+                return nil
+            }
+            return URL(fileURLWithPath: item.originalPath)
+        }
+    }
+    
+    public func handleItemClick(_ item: SynapsFileItem, commandKey: Bool = false, shiftKey: Bool = false) {
+        if commandKey {
+            if selectedItemIds.contains(item.id) {
+                selectedItemIds.remove(item.id)
+            } else {
+                selectedItemIds.insert(item.id)
+                lastSelectedId = item.id
+            }
+        } else if shiftKey, let lastId = lastSelectedId,
+                  let lastIdx = filteredItems.firstIndex(where: { $0.id == lastId }),
+                  let currentIdx = filteredItems.firstIndex(where: { $0.id == item.id }) {
+            let range = min(lastIdx, currentIdx)...max(lastIdx, currentIdx)
+            for i in range {
+                selectedItemIds.insert(filteredItems[i].id)
+            }
+        } else {
+            selectedItemIds = [item.id]
+            lastSelectedId = item.id
+        }
+    }
+    
     public func toggleSelection(id: String) {
         if selectedItemIds.contains(id) {
             selectedItemIds.remove(id)
         } else {
             selectedItemIds.insert(id)
+            lastSelectedId = id
         }
+    }
+    
+    public func clearSelection() {
+        selectedItemIds.removeAll()
+        lastSelectedId = nil
     }
     
     public func selectAll() {
@@ -234,6 +276,7 @@ public final class AppViewModel: ObservableObject {
     
     public func deselectAll() {
         selectedItemIds.removeAll()
+        lastSelectedId = nil
     }
     
     public func importSelectedItems() {
