@@ -545,6 +545,7 @@ public final class AppViewModel: ObservableObject {
                 sourceLocation: sourceLocation,
                 sourceId: sourceId
             )
+            guard self.currentFolderPath == path else { return }
             self.fileItems = items
             self.isLoading = false
             
