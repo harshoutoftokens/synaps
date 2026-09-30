@@ -12,6 +12,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var syncSpeedMBs: Double = 0.0
     @Published public var syncStatusMessage: String = "Ready"
     @Published public var nasOnline: Bool = false
+    @Published public var isCheckingNAS: Bool = false
     @Published public var nasBaseUrl: String = NASClient.shared.getBaseUrl()
     @Published public var searchQuery: String = ""
     @Published public var filterSelection: FilterOption = .all
@@ -241,6 +242,16 @@ public final class AppViewModel: ObservableObject {
     }
     
     public func checkNASStatus() async {
+        guard !isCheckingNAS else { return }
+        await MainActor.run {
+            self.isCheckingNAS = true
+        }
+        defer {
+            Task { @MainActor in
+                self.isCheckingNAS = false
+            }
+        }
+        
         let online = await nasClient.checkHealth()
         let currentUrl = nasClient.getBaseUrl()
         let wasOffline = !self.nasOnline

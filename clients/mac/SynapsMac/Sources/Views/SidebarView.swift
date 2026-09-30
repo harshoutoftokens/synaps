@@ -121,10 +121,12 @@ public struct SidebarView: View {
                             await viewModel.checkNASStatus()
                         }
                     } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption)
+                        SpinningRefreshIcon(isSpinning: viewModel.isCheckingNAS)
                     }
                     .buttonStyle(.plain)
+                    .disabled(viewModel.isCheckingNAS)
+                    .help(viewModel.isCheckingNAS ? "Checking NAS connection..." : "Refresh NAS connection")
+                    .accessibilityLabel(viewModel.isCheckingNAS ? "Checking NAS connection" : "Refresh NAS connection")
                 }
                 .padding(.vertical, 4)
             }
@@ -156,5 +158,32 @@ public struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .padding(.vertical, 2)
+    }
+}
+
+public struct SpinningRefreshIcon: View {
+    let isSpinning: Bool
+    @State private var isAnimating: Bool = false
+    
+    public init(isSpinning: Bool) {
+        self.isSpinning = isSpinning
+    }
+    
+    public var body: some View {
+        Image(systemName: "arrow.clockwise")
+            .font(.caption)
+            .rotationEffect(.degrees(isAnimating ? 360 : 0))
+            .animation(
+                isAnimating
+                    ? Animation.linear(duration: 0.8).repeatForever(autoreverses: false)
+                    : Animation.easeOut(duration: 0.2),
+                value: isAnimating
+            )
+            .onAppear {
+                isAnimating = isSpinning
+            }
+            .onChange(of: isSpinning) { _, newValue in
+                isAnimating = newValue
+            }
     }
 }
