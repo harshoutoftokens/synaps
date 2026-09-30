@@ -6,7 +6,7 @@ public struct PhotosGridView: View {
     @State private var gridSize: CGFloat = 130
     
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: gridSize, maximum: gridSize + 40), spacing: 10)]
+        [GridItem(.adaptive(minimum: gridSize, maximum: gridSize + 40), spacing: 12, alignment: .top)]
     }
     
     public var body: some View {
@@ -78,76 +78,95 @@ public struct PhotoThumbnailCell: View {
     @State private var nsImage: NSImage?
     @State private var isHovered = false
     
+    private var isDirectoryOrDoc: Bool {
+        item.isDirectory || !item.isImageOrVideo
+    }
+    
     public var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            // Background & Thumbnail
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                
-                if let img = nsImage {
-                    Image(nsImage: img)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
+        VStack(spacing: 6) {
+            ZStack(alignment: .bottomTrailing) {
+                // Background & Thumbnail / Icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                    
+                    if let img = nsImage {
+                        if isDirectoryOrDoc {
+                            Image(nsImage: img)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .padding(size * 0.14)
+                                .frame(width: size, height: size)
+                        } else {
+                            Image(nsImage: img)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: size, height: size)
+                                .clipped()
+                                .cornerRadius(10)
+                        }
+                    } else {
+                        VStack(spacing: 6) {
+                            Image(systemName: item.isDirectory ? "folder.fill" : (item.isLivePhotoVideo ? "video.fill" : (item.isImageOrVideo ? "photo" : "doc.fill")))
+                                .font(.system(size: size * 0.3))
+                                .foregroundColor(item.isDirectory ? .accentColor : .secondary.opacity(0.7))
+                        }
                         .frame(width: size, height: size)
-                        .clipped()
-                        .cornerRadius(10)
-                } else {
-                    VStack(spacing: 6) {
-                        Image(systemName: item.isLivePhotoVideo ? "video.fill" : "photo")
-                            .font(.system(size: size * 0.25))
-                            .foregroundColor(.secondary.opacity(0.6))
-                        Text(item.filename)
-                            .font(.system(size: 9))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 4)
                     }
-                }
-            }
-            .frame(width: size, height: size)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isHovered ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isHovered ? 2 : 1)
-            )
-            
-            // Favorite Badge (Top Left)
-            if item.isFavorite {
-                VStack {
-                    HStack {
-                        Image(systemName: "heart.fill")
-                            .foregroundColor(.pink)
-                            .font(.system(size: 11))
-                            .padding(4)
-                            .background(Circle().fill(Color.black.opacity(0.6)))
-                            .padding(6)
-                        Spacer()
-                    }
-                    Spacer()
                 }
                 .frame(width: size, height: size)
-            }
-            
-            // Video indicator (Top Right)
-            if item.isLivePhotoVideo || item.filename.lowercased().hasSuffix(".mov") || item.filename.lowercased().hasSuffix(".mp4") {
-                VStack {
-                    HStack {
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(isHovered ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isHovered ? 2 : 1)
+                )
+                
+                // Favorite Badge (Top Left)
+                if item.isFavorite {
+                    VStack {
+                        HStack {
+                            Image(systemName: "heart.fill")
+                                .foregroundColor(.pink)
+                                .font(.system(size: 11))
+                                .padding(4)
+                                .background(Circle().fill(Color.black.opacity(0.6)))
+                                .padding(6)
+                            Spacer()
+                        }
                         Spacer()
-                        Image(systemName: "play.circle.fill")
-                            .foregroundColor(.white)
-                            .font(.system(size: 13))
-                            .padding(6)
                     }
-                    Spacer()
+                    .frame(width: size, height: size)
                 }
-                .frame(width: size, height: size)
+                
+                // Video indicator (Top Right)
+                if item.isLivePhotoVideo || item.filename.lowercased().hasSuffix(".mov") || item.filename.lowercased().hasSuffix(".mp4") {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "play.circle.fill")
+                                .foregroundColor(.white)
+                                .font(.system(size: 13))
+                                .padding(6)
+                        }
+                        Spacer()
+                    }
+                    .frame(width: size, height: size)
+                }
+                
+                // Git-for-Files Badge (Bottom Right)
+                FileBadgeView(status: item.syncStatus, size: max(16, size * 0.16))
+                    .padding(6)
             }
             
-            // Git-for-Files Badge (Bottom Right)
-            FileBadgeView(status: item.syncStatus, size: max(16, size * 0.16))
-                .padding(6)
+            // Item / Folder Name Label
+            Text(item.filename)
+                .font(.system(size: max(10, min(12, size * 0.085))))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .truncationMode(.middle)
+                .foregroundColor(isHovered ? .accentColor : .primary)
+                .frame(width: size + 16, alignment: .top)
         }
+        .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onAppear {
             loadThumbnail()
