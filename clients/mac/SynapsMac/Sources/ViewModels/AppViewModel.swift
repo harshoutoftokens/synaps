@@ -125,10 +125,6 @@ public final class AppViewModel: ObservableObject {
         }
         
         items.sort { a, b in
-            if a.isDirectory != b.isDirectory {
-                return a.isDirectory && !b.isDirectory
-            }
-            
             let comparison: ComparisonResult
             switch sortField {
             case .name:

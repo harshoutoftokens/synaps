@@ -119,12 +119,9 @@ public final class LocalFileScanner {
                     }
                 }
                 
-                // Sort folders first, then recent files
+                // Natural alphabetical ordering matching Finder defaults
                 results.sort {
-                    if $0.isDirectory != $1.isDirectory {
-                        return $0.isDirectory && !$1.isDirectory
-                    }
-                    return $0.modifiedAt > $1.modifiedAt
+                    $0.filename.localizedStandardCompare($1.filename) == .orderedAscending
                 }
                 
                 // Return immediate results to UI in < 0.05 seconds!
