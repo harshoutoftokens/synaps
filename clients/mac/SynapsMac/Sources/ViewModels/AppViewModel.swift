@@ -14,6 +14,18 @@ public final class AppViewModel: ObservableObject {
     @Published public var nasOnline: Bool = false
     @Published public var searchQuery: String = ""
     @Published public var filterSelection: FilterOption = .all
+    @Published public var sortField: SortField = .name
+    @Published public var sortAscending: Bool = true
+    
+    public enum SortField: String, CaseIterable, Identifiable {
+        case name = "Name"
+        case dateModified = "Date Modified"
+        case dateCreated = "Date Created"
+        case size = "Size"
+        case kind = "Kind"
+        
+        public var id: String { rawValue }
+    }
     
     public enum FilterOption: String, CaseIterable, Identifiable {
         case all = "All Files"
@@ -88,6 +100,48 @@ public final class AppViewModel: ObservableObject {
         if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
             let q = searchQuery.lowercased()
             items = items.filter { $0.filename.lowercased().contains(q) }
+        }
+        
+        items.sort { a, b in
+            if a.isDirectory != b.isDirectory {
+                return a.isDirectory && !b.isDirectory
+            }
+            
+            let comparison: ComparisonResult
+            switch sortField {
+            case .name:
+                comparison = a.filename.localizedStandardCompare(b.filename)
+            case .dateModified:
+                comparison = a.modifiedAt.compare(b.modifiedAt)
+            case .dateCreated:
+                comparison = a.createdAt.compare(b.createdAt)
+            case .size:
+                if a.fileSize < b.fileSize {
+                    comparison = .orderedAscending
+                } else if a.fileSize > b.fileSize {
+                    comparison = .orderedDescending
+                } else {
+                    comparison = .orderedSame
+                }
+            case .kind:
+                let extA = (a.filename as NSString).pathExtension.lowercased()
+                let extB = (b.filename as NSString).pathExtension.lowercased()
+                if extA.isEmpty && !extB.isEmpty {
+                    comparison = .orderedDescending
+                } else if !extA.isEmpty && extB.isEmpty {
+                    comparison = .orderedAscending
+                } else if extA == extB {
+                    comparison = a.filename.localizedStandardCompare(b.filename)
+                } else {
+                    comparison = extA.localizedStandardCompare(extB)
+                }
+            }
+            
+            if comparison == .orderedSame {
+                return a.filename.localizedStandardCompare(b.filename) == .orderedAscending
+            }
+            
+            return sortAscending ? (comparison == .orderedAscending) : (comparison == .orderedDescending)
         }
         
         return items

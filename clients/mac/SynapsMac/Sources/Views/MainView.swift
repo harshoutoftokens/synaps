@@ -37,6 +37,59 @@ public struct MainView: View {
                     .pickerStyle(.menu)
                     .frame(width: 160)
                     
+                    // Sort Menu
+                    Menu {
+                        Section("Sort By") {
+                            ForEach(AppViewModel.SortField.allCases) { field in
+                                Button {
+                                    if viewModel.sortField == field {
+                                        viewModel.sortAscending.toggle()
+                                    } else {
+                                        viewModel.sortField = field
+                                        viewModel.sortAscending = (field == .name || field == .kind)
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(field.rawValue)
+                                        if viewModel.sortField == field {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Section("Order") {
+                            Button {
+                                viewModel.sortAscending = true
+                            } label: {
+                                HStack {
+                                    Text("Ascending")
+                                    if viewModel.sortAscending {
+                                        Spacer()
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                            
+                            Button {
+                                viewModel.sortAscending = false
+                            } label: {
+                                HStack {
+                                    Text("Descending")
+                                    if !viewModel.sortAscending {
+                                        Spacer()
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .help("Sort items by \(viewModel.sortField.rawValue) (\(viewModel.sortAscending ? "Ascending" : "Descending"))")
+                    
                     // Display Mode Toggle (List vs Grid)
                     Picker("View", selection: $displayMode) {
                         Image(systemName: "list.bullet").tag(ContentDisplayMode.list)
