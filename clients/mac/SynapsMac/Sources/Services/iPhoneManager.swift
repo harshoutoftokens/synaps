@@ -1,6 +1,7 @@
 import Foundation
 import ImageCaptureCore
 import AppKit
+import ImageIO
 
 public struct ConnectedPhoneInfo: Identifiable {
     public let id: String
@@ -29,7 +30,6 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     private var activeCamera: ICCameraDevice?
     private var cameraFilesByName: [String: ICCameraFile] = [:]
     private let thumbnailCache = NSCache<NSString, NSImage>()
-    private var activeDownloadContinuation: CheckedContinuation<URL?, Never>?
     
     public var importDirectoryURL: URL {
         let pictures = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first
@@ -39,7 +39,8 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     
     public override init() {
         super.init()
-        thumbnailCache.countLimit = 300
+        thumbnailCache.countLimit = 250
+        thumbnailCache.totalCostLimit = 40 * 1024 * 1024 // 40 MB max cache to keep RAM pressure minimal
         try? FileManager.default.createDirectory(at: importDirectoryURL, withIntermediateDirectories: true)
         startMonitoring()
     }
@@ -128,10 +129,72 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         updateDeviceMediaList(device)
     }
     
+    // MARK: - Safe Downscaling & Memory Management
+    private func downscaleData(_ data: Data, targetDimension: CGFloat) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+        let maxPixelSize = Int(targetDimension)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        if let thumbCG = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            return NSImage(cgImage: thumbCG, size: NSSize(width: CGFloat(thumbCG.width), height: CGFloat(thumbCG.height)))
+        }
+        return nil
+    }
+    
+    private func downscaleCGImage(_ cgImage: CGImage, targetDimension: CGFloat) -> NSImage {
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        guard width > targetDimension || height > targetDimension else {
+            return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+        }
+        
+        let aspect = width / height
+        let newWidth: CGFloat
+        let newHeight: CGFloat
+        if aspect > 1 {
+            newWidth = targetDimension
+            newHeight = targetDimension / aspect
+        } else {
+            newWidth = targetDimension * aspect
+            newHeight = targetDimension
+        }
+        
+        let colorSpace = cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: Int(newWidth),
+            height: Int(newHeight),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return NSImage(cgImage: cgImage, size: NSSize(width: newWidth, height: newHeight))
+        }
+        
+        context.interpolationQuality = .medium
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
+        
+        if let scaledCGImage = context.makeImage() {
+            return NSImage(cgImage: scaledCGImage, size: NSSize(width: newWidth, height: newHeight))
+        }
+        
+        return NSImage(cgImage: cgImage, size: NSSize(width: newWidth, height: newHeight))
+    }
+    
+    @objc(cameraDevice:didReceiveThumbnail:forItem:error:)
     public func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {
         guard let cgImage = thumbnail, let name = item.name else { return }
-        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: 160, height: 160))
-        thumbnailCache.setObject(nsImage, forKey: name as NSString)
+        let nsImage = downscaleCGImage(cgImage, targetDimension: 160)
+        let cost = Int(nsImage.size.width * nsImage.size.height * 4)
+        thumbnailCache.setObject(nsImage, forKey: name as NSString, cost: cost)
         DispatchQueue.main.async {
             self.thumbnailsVersion += 1
         }
@@ -162,13 +225,44 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         return thumbnailCache.object(forKey: filename as NSString)
     }
     
-    public func requestThumbnail(for filename: String) {
-        if thumbnailCache.object(forKey: filename as NSString) != nil {
+    public func loadThumbnail(for filename: String, completion: @escaping (NSImage?) -> Void) {
+        if let cached = thumbnailCache.object(forKey: filename as NSString) {
+            completion(cached)
             return
         }
-        if let file = cameraFilesByName[filename] {
-            file.requestThumbnail()
+        
+        guard let file = cameraFilesByName[filename] else {
+            completion(nil)
+            return
         }
+        
+        // Fast path: thumbnail already generated and cached on ICCameraFile
+        if let cgThumb = file.thumbnail {
+            let nsImage = downscaleCGImage(cgThumb, targetDimension: 160)
+            let cost = Int(nsImage.size.width * nsImage.size.height * 4)
+            thumbnailCache.setObject(nsImage, forKey: filename as NSString, cost: cost)
+            completion(nsImage)
+            return
+        }
+        
+        // Block-based asynchronous request directly from device
+        file.requestThumbnailData(options: nil) { [weak self] data, error in
+            guard let self = self else { return }
+            if let data = data, let img = self.downscaleData(data, targetDimension: 160) {
+                let cost = Int(img.size.width * img.size.height * 4)
+                self.thumbnailCache.setObject(img, forKey: filename as NSString, cost: cost)
+                DispatchQueue.main.async {
+                    completion(img)
+                }
+            } else {
+                // Delegate fallback
+                file.requestThumbnail()
+            }
+        }
+    }
+    
+    public func requestThumbnail(for filename: String) {
+        loadThumbnail(for: filename) { _ in }
     }
     
     // MARK: - Media List Update
@@ -256,36 +350,68 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     
     // MARK: - Download / Import Implementation
     private func downloadFile(_ cameraFile: ICCameraFile, to directoryURL: URL) async -> URL? {
-        guard let camera = activeCamera else { return nil }
+        guard activeCamera != nil else { return nil }
+        
+        let filename = cameraFile.name ?? "photo.jpg"
+        let expectedDest = directoryURL.appendingPathComponent(filename)
+        
+        let options: [ICDownloadOption: Any] = [
+            .downloadsDirectoryURL: directoryURL as NSURL,
+            .overwrite: NSNumber(value: true),
+            ICDownloadOption(rawValue: "ICOverwriteExistingFile"): NSNumber(value: true)
+        ]
         
         return await withCheckedContinuation { continuation in
-            self.activeDownloadContinuation = continuation
-            let options: [ICDownloadOption: Any] = [
-                .downloadsDirectoryURL: directoryURL,
-                .overwrite: true
-            ]
-            camera.requestDownloadFile(
-                cameraFile,
-                options: options,
-                downloadDelegate: self,
-                didDownloadSelector: #selector(didDownloadFile(_:error:options:contextInfo:)),
-                contextInfo: nil
-            )
+            var hasResumed = false
+            let lock = NSLock()
+            
+            // Timeout safety to ensure continuation never hangs if ImageCaptureCore stalls
+            let timeoutWork = DispatchWorkItem {
+                lock.lock()
+                defer { lock.unlock() }
+                if !hasResumed {
+                    hasResumed = true
+                    print("⚠️ Download timed out for \(filename)")
+                    continuation.resume(returning: nil)
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeoutWork)
+            
+            _ = cameraFile.requestDownload(options: options) { savedFilename, error in
+                timeoutWork.cancel()
+                lock.lock()
+                defer { lock.unlock() }
+                guard !hasResumed else { return }
+                hasResumed = true
+                
+                if let error = error {
+                    print("❌ Error downloading \(filename): \(error.localizedDescription)")
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                if let saved = savedFilename, !saved.isEmpty {
+                    let dest: URL
+                    if saved.hasPrefix("/") {
+                        dest = URL(fileURLWithPath: saved)
+                    } else {
+                        dest = directoryURL.appendingPathComponent(saved)
+                    }
+                    if FileManager.default.fileExists(atPath: dest.path) {
+                        continuation.resume(returning: dest)
+                        return
+                    }
+                }
+                
+                // Fallback: check if expected destination exists
+                if FileManager.default.fileExists(atPath: expectedDest.path) {
+                    continuation.resume(returning: expectedDest)
+                    return
+                }
+                
+                continuation.resume(returning: nil)
+            }
         }
-    }
-    
-    @objc public func didDownloadFile(_ file: ICCameraFile, error: Error?, options: [String: Any], contextInfo: UnsafeMutableRawPointer?) {
-        if let error = error {
-            print("Error downloading \(file.name ?? ""): \(error.localizedDescription)")
-            activeDownloadContinuation?.resume(returning: nil)
-            activeDownloadContinuation = nil
-            return
-        }
-        
-        let filename = file.name ?? "photo"
-        let dest = importDirectoryURL.appendingPathComponent(filename)
-        activeDownloadContinuation?.resume(returning: dest)
-        activeDownloadContinuation = nil
     }
     
     @MainActor
@@ -309,25 +435,46 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         let destDir = importDirectoryURL
         try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
         
+        var importedVirtualPaths = Set<String>()
+        
         for (index, file) in filesToDownload.enumerated() {
             let name = file.name ?? "file"
             importStatusMessage = "[\(index + 1)/\(total)] Importing \(name)..."
             
             if let downloadedURL = await downloadFile(file, to: destDir) {
                 importedItemsCount += 1
+                let virtualPath = "iPhone://\(name)"
+                importedVirtualPaths.insert(virtualPath)
                 
                 // Hash and index into local cache store
                 if let sha = HashEngine.computeSHA256(for: downloadedURL.path) {
                     let stat = try? FileManager.default.attributesOfItem(atPath: downloadedURL.path)
                     let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
+                    let fileSize = (stat?[.size] as? NSNumber)?.int64Value ?? file.fileSize
+                    let now = Date().timeIntervalSince1970
+                    
+                    // Save local imported file record
                     LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
                         path: downloadedURL.path,
                         inode: inode,
-                        size: file.fileSize,
-                        mtime: Date().timeIntervalSince1970,
+                        size: fileSize,
+                        mtime: now,
                         sha256: sha,
                         lastSyncedAt: nil,
                         syncStatus: SyncStatus.uncommitted.rawValue,
+                        album: "iPhone Import",
+                        isFavorite: false
+                    ))
+                    
+                    // Also mark virtual record as committed
+                    LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
+                        path: virtualPath,
+                        inode: 0,
+                        size: file.fileSize,
+                        mtime: now,
+                        sha256: sha,
+                        lastSyncedAt: now,
+                        syncStatus: SyncStatus.committed.rawValue,
                         album: "iPhone Import",
                         isFavorite: false
                     ))
@@ -335,6 +482,13 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
             }
             
             importProgress = Double(index + 1) / Double(total)
+        }
+        
+        // Update phoneMediaItems state in-place
+        for i in 0..<self.phoneMediaItems.count {
+            if importedVirtualPaths.contains(self.phoneMediaItems[i].originalPath) {
+                self.phoneMediaItems[i].syncStatus = .committed
+            }
         }
         
         isImporting = false
