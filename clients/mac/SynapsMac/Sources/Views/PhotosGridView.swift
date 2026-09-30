@@ -446,6 +446,11 @@ public struct PhotoThumbnailCell: View {
                     onToggleSelect?()
                 }
             }
+            if !item.isDirectory && FileManager.default.fileExists(atPath: item.originalPath) {
+                Button("Quick Look") {
+                    QuickLookCoordinator.shared.toggleQuickLook(for: [URL(fileURLWithPath: item.originalPath)])
+                }
+            }
             if FileManager.default.fileExists(atPath: item.originalPath) {
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.selectFile(item.originalPath, inFileViewerRootedAtPath: "")
