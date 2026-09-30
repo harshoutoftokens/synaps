@@ -14,6 +14,8 @@ public final class LocalFileScanner {
         "tmp", "download", "part", "crdownload"
     ]
     
+    public var onItemsHashed: (([SynapsFileItem]) -> Void)?
+    
     public func scanDirectory(
         directoryPath: String,
         sourceLocation: String,
@@ -130,23 +132,39 @@ public final class LocalFileScanner {
                 // Compute hashes asynchronously one-by-one in background with autoreleasepool
                 if !itemsNeedingHash.isEmpty {
                     self.hashQueue.async {
+                        var newlyHashed: [SynapsFileItem] = []
                         for item in itemsNeedingHash {
                             autoreleasepool {
                                 if let sha = HashEngine.computeSHA256(for: item.originalPath) {
                                     let stat = (try? fileManager.attributesOfItem(atPath: item.originalPath))
                                     let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
+                                    let cached = self.cacheStore.getRecord(for: item.originalPath)
+                                    let currentStatus = cached?.syncStatus ?? SyncStatus.uncommitted.rawValue
                                     self.cacheStore.saveRecord(LocalCacheStore.CachedRecord(
                                         path: item.originalPath,
                                         inode: inode,
                                         size: item.fileSize,
                                         mtime: item.modifiedAt.timeIntervalSince1970,
                                         sha256: sha,
-                                        lastSyncedAt: nil,
-                                        syncStatus: SyncStatus.uncommitted.rawValue,
+                                        lastSyncedAt: cached?.lastSyncedAt,
+                                        syncStatus: currentStatus,
                                         album: item.albumName,
                                         isFavorite: item.isFavorite
                                     ))
+                                    
+                                    var updatedItem = item
+                                    updatedItem.sha256 = sha
+                                    if currentStatus == SyncStatus.committed.rawValue {
+                                        updatedItem.syncStatus = .committed
+                                    }
+                                    newlyHashed.append(updatedItem)
                                 }
+                            }
+                        }
+                        
+                        if !newlyHashed.isEmpty {
+                            DispatchQueue.main.async {
+                                self.onItemsHashed?(newlyHashed)
                             }
                         }
                     }
