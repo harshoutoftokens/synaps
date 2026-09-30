@@ -14,6 +14,23 @@ public final class AppViewModel: ObservableObject {
     @Published public var nasOnline: Bool = false
     @Published public var searchQuery: String = ""
     @Published public var filterSelection: FilterOption = .all
+    @Published public var sortField: SortField = .name
+    @Published public var sortAscending: Bool = true
+    @Published public var selectedItemIds: Set<String> = []
+    
+    public var isPicturesSection: Bool {
+        selectedSidebarItem?.id == "section_pictures" || selectedSidebarItem?.isPhone == true
+    }
+    
+    public enum SortField: String, CaseIterable, Identifiable {
+        case name = "Name"
+        case dateModified = "Date Modified"
+        case dateCreated = "Date Created"
+        case size = "Size"
+        case kind = "Kind"
+        
+        public var id: String { rawValue }
+    }
     
     public enum FilterOption: String, CaseIterable, Identifiable {
         case all = "All Files"
@@ -41,8 +58,13 @@ public final class AppViewModel: ObservableObject {
     private func setupPhoneObserver() {
         phoneManager.$connectedDevice
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
+            .sink { [weak self] dev in
+                guard let self = self else { return }
+                self.objectWillChange.send()
+                if dev == nil && self.isPicturesSection {
+                    self.fileItems = []
+                    self.selectedItemIds.removeAll()
+                }
             }
             .store(in: &cancellables)
             
@@ -50,8 +72,20 @@ public final class AppViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] phoneItems in
                 guard let self = self else { return }
-                if self.selectedSidebarItem?.isPhone == true {
+                if self.isPicturesSection {
                     self.fileItems = phoneItems
+                }
+            }
+            .store(in: &cancellables)
+            
+        phoneManager.$isDeviceLocked
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] locked in
+                guard let self = self else { return }
+                self.objectWillChange.send()
+                if locked && self.isPicturesSection {
+                    self.fileItems = []
+                    self.selectedItemIds.removeAll()
                 }
             }
             .store(in: &cancellables)
@@ -90,6 +124,48 @@ public final class AppViewModel: ObservableObject {
             items = items.filter { $0.filename.lowercased().contains(q) }
         }
         
+        items.sort { a, b in
+            if a.isDirectory != b.isDirectory {
+                return a.isDirectory && !b.isDirectory
+            }
+            
+            let comparison: ComparisonResult
+            switch sortField {
+            case .name:
+                comparison = a.filename.localizedStandardCompare(b.filename)
+            case .dateModified:
+                comparison = a.modifiedAt.compare(b.modifiedAt)
+            case .dateCreated:
+                comparison = a.createdAt.compare(b.createdAt)
+            case .size:
+                if a.fileSize < b.fileSize {
+                    comparison = .orderedAscending
+                } else if a.fileSize > b.fileSize {
+                    comparison = .orderedDescending
+                } else {
+                    comparison = .orderedSame
+                }
+            case .kind:
+                let extA = (a.filename as NSString).pathExtension.lowercased()
+                let extB = (b.filename as NSString).pathExtension.lowercased()
+                if extA.isEmpty && !extB.isEmpty {
+                    comparison = .orderedDescending
+                } else if !extA.isEmpty && extB.isEmpty {
+                    comparison = .orderedAscending
+                } else if extA == extB {
+                    comparison = a.filename.localizedStandardCompare(b.filename)
+                } else {
+                    comparison = extA.localizedStandardCompare(extB)
+                }
+            }
+            
+            if comparison == .orderedSame {
+                return a.filename.localizedStandardCompare(b.filename) == .orderedAscending
+            }
+            
+            return sortAscending ? (comparison == .orderedAscending) : (comparison == .orderedDescending)
+        }
+        
         return items
     }
     
@@ -118,11 +194,65 @@ public final class AppViewModel: ObservableObject {
     public func selectSidebarItem(_ item: SidebarItem) {
         self.selectedSidebarItem = item
         self.navigationHistory = []
+        self.selectedItemIds.removeAll()
         if item.isPhone {
             self.fileItems = phoneManager.phoneMediaItems
             self.currentFolderPath = "iPhone"
         } else if let path = item.path {
             loadFolder(path: path, sourceLocation: item.title, sourceId: item.sourceId)
+        }
+    }
+    
+    public func selectPicturesSection() {
+        let item = SidebarItem(
+            id: "section_pictures",
+            title: "Pictures",
+            icon: "photo.on.rectangle.angled",
+            section: .macFolders,
+            path: nil,
+            sourceId: "iphone_harsh",
+            isPhone: true
+        )
+        self.selectedSidebarItem = item
+        self.navigationHistory = []
+        self.currentFolderPath = "iPhone"
+        self.selectedItemIds.removeAll()
+        if phoneManager.connectedDevice != nil && !phoneManager.isDeviceLocked {
+            self.fileItems = phoneManager.phoneMediaItems
+        } else {
+            self.fileItems = []
+        }
+    }
+    
+    public func toggleSelection(id: String) {
+        if selectedItemIds.contains(id) {
+            selectedItemIds.remove(id)
+        } else {
+            selectedItemIds.insert(id)
+        }
+    }
+    
+    public func selectAll() {
+        selectedItemIds = Set(filteredItems.map { $0.id })
+    }
+    
+    public func deselectAll() {
+        selectedItemIds.removeAll()
+    }
+    
+    public func importSelectedItems() {
+        let filenames = filteredItems.filter { selectedItemIds.contains($0.id) }.map { $0.filename }
+        Task {
+            await phoneManager.importItems(filenames: filenames)
+            self.selectedItemIds.removeAll()
+        }
+    }
+    
+    public func importAllItems() {
+        let filenames = filteredItems.map { $0.filename }
+        Task {
+            await phoneManager.importItems(filenames: filenames)
+            self.selectedItemIds.removeAll()
         }
     }
     

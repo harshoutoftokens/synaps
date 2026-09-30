@@ -11,6 +11,205 @@ public struct PhotosGridView: View {
     
     public var body: some View {
         VStack(spacing: 0) {
+            if viewModel.isPicturesSection {
+                picturesContent
+            } else {
+                standardFolderContent
+            }
+        }
+    }
+    
+    // MARK: - Pictures (iPhone Import) View
+    @ViewBuilder
+    private var picturesContent: some View {
+        if viewModel.phoneManager.connectedDevice == nil {
+            noPhoneConnectedView
+        } else if viewModel.phoneManager.isDeviceLocked {
+            deviceLockedView
+        } else {
+            VStack(spacing: 0) {
+                importControlsBar
+                
+                Divider()
+                
+                if viewModel.isLoading {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Reading photos from iPhone...")
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                } else if viewModel.filteredItems.isEmpty {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("No Photos Found on iPhone")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 14) {
+                            ForEach(viewModel.filteredItems) { item in
+                                PhotoThumbnailCell(
+                                    item: item,
+                                    size: gridSize,
+                                    isPicturesSection: true,
+                                    isSelected: viewModel.selectedItemIds.contains(item.id),
+                                    onToggleSelect: {
+                                        viewModel.toggleSelection(id: item.id)
+                                    },
+                                    onDoubleClick: {
+                                        viewModel.toggleSelection(id: item.id)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(14)
+                    }
+                }
+            }
+        }
+    }
+    
+    private var noPhoneConnectedView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "cable.connector.horizontal")
+                .font(.system(size: 52))
+                .foregroundColor(.secondary.opacity(0.8))
+            Text("No iPhone Connected")
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text("Connect your iPhone to this Mac via USB cable to browse and import photos.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private var deviceLockedView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.shield")
+                .font(.system(size: 52))
+                .foregroundColor(.orange)
+            Text("iPhone is Locked")
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text("Unlock your iPhone with your passcode or Face ID and tap \"Trust This Computer\" to view photos.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+            Button {
+                viewModel.phoneManager.checkDeviceStatus()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Check Again")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private var importControlsBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(viewModel.filteredItems.count) Photos & Videos on iPhone")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    if !viewModel.selectedItemIds.isEmpty {
+                        Text("\(viewModel.selectedItemIds.count) of \(viewModel.filteredItems.count) selected")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                // Zoom slider
+                zoomSlider
+                
+                if !viewModel.filteredItems.isEmpty {
+                    Button(viewModel.selectedItemIds.count == viewModel.filteredItems.count ? "Deselect All" : "Select All") {
+                        if viewModel.selectedItemIds.count == viewModel.filteredItems.count {
+                            viewModel.deselectAll()
+                        } else {
+                            viewModel.selectAll()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    
+                    Button {
+                        viewModel.importSelectedItems()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "square.and.arrow.down")
+                            Text("Import Selected (\(viewModel.selectedItemIds.count))")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(viewModel.selectedItemIds.isEmpty || viewModel.phoneManager.isImporting)
+                    
+                    Button {
+                        viewModel.importAllItems()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.circle.fill")
+                            Text("Import All")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(viewModel.filteredItems.isEmpty || viewModel.phoneManager.isImporting)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+            
+            if viewModel.phoneManager.isImporting {
+                VStack(spacing: 4) {
+                    ProgressView(value: viewModel.phoneManager.importProgress)
+                        .progressViewStyle(.linear)
+                        .padding(.horizontal, 16)
+                    Text(viewModel.phoneManager.importStatusMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.08))
+            } else if !viewModel.phoneManager.importStatusMessage.isEmpty {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.caption)
+                    Text(viewModel.phoneManager.importStatusMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+                .background(Color.green.opacity(0.08))
+            }
+        }
+    }
+    
+    // MARK: - Standard Folder Content
+    private var standardFolderContent: some View {
+        VStack(spacing: 0) {
             // Controls bar (Navigation, Zoom slider & stats)
             HStack(spacing: 12) {
                 if !viewModel.navigationHistory.isEmpty {
@@ -26,25 +225,13 @@ public struct PhotosGridView: View {
                     .controlSize(.small)
                 }
                 
-                Text("\(viewModel.filteredItems.count) \(viewModel.selectedSidebarItem?.isPhone == true ? "Photos & Videos" : "items")")
+                Text("\(viewModel.filteredItems.count) items")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
                 Spacer()
                 
-                // Zoom slider
-                HStack(spacing: 8) {
-                    Image(systemName: "square.grid.3x3")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    Slider(value: $gridSize, in: 80...240)
-                        .frame(width: 100)
-                    
-                    Image(systemName: "square.grid.2x2")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                zoomSlider
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -75,7 +262,7 @@ public struct PhotosGridView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(viewModel.filteredItems) { item in
-                            PhotoThumbnailCell(item: item, size: gridSize) {
+                            PhotoThumbnailCell(item: item, size: gridSize, onDoubleClick: {
                                 if item.isDirectory {
                                     viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
                                 } else {
@@ -84,7 +271,7 @@ public struct PhotosGridView: View {
                                         NSWorkspace.shared.open(url)
                                     }
                                 }
-                            }
+                            })
                         }
                     }
                     .padding(14)
@@ -92,12 +279,31 @@ public struct PhotosGridView: View {
             }
         }
     }
+    
+    private var zoomSlider: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "square.grid.3x3")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Slider(value: $gridSize, in: 80...240)
+                .frame(width: 90)
+            
+            Image(systemName: "square.grid.2x2")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
 }
 
 public struct PhotoThumbnailCell: View {
     public let item: SynapsFileItem
     public let size: CGFloat
+    public var isPicturesSection: Bool = false
+    public var isSelected: Bool = false
+    public var onToggleSelect: (() -> Void)? = nil
     public var onDoubleClick: (() -> Void)? = nil
+    
     @State private var nsImage: NSImage?
     @State private var isHovered = false
     
@@ -140,11 +346,36 @@ public struct PhotoThumbnailCell: View {
                 .frame(width: size, height: size)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(isHovered ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isHovered ? 2 : 1)
+                        .stroke(
+                            isSelected ? Color.accentColor : (isHovered ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.08)),
+                            lineWidth: isSelected ? 3 : (isHovered ? 2 : 1)
+                        )
                 )
                 
-                // Favorite Badge (Top Left)
-                if item.isFavorite {
+                // Selection Checkbox for Pictures Section (Top Left)
+                if isPicturesSection {
+                    VStack {
+                        HStack {
+                            Button {
+                                onToggleSelect?()
+                            } label: {
+                                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(isSelected ? .accentColor : (isHovered ? .white : .clear))
+                                    .font(.system(size: max(16, size * 0.16)))
+                                    .background(
+                                        Circle()
+                                            .fill(isSelected ? Color.clear : (isHovered ? Color.black.opacity(0.4) : Color.clear))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .padding(6)
+                            Spacer()
+                        }
+                        Spacer()
+                    }
+                    .frame(width: size, height: size)
+                } else if item.isFavorite {
+                    // Favorite Badge (Top Left)
                     VStack {
                         HStack {
                             Image(systemName: "heart.fill")
@@ -186,10 +417,15 @@ public struct PhotoThumbnailCell: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .truncationMode(.middle)
-                .foregroundColor(isHovered ? .accentColor : .primary)
+                .foregroundColor(isSelected ? .accentColor : (isHovered ? .accentColor : .primary))
                 .frame(width: size + 16, alignment: .top)
         }
         .contentShape(Rectangle())
+        .onTapGesture {
+            if isPicturesSection {
+                onToggleSelect?()
+            }
+        }
         .onTapGesture(count: 2) {
             onDoubleClick?()
         }
@@ -197,9 +433,23 @@ public struct PhotoThumbnailCell: View {
         .onAppear {
             loadThumbnail()
         }
+        .onReceive(iPhoneManager.shared.$thumbnailsVersion) { _ in
+            if item.originalPath.hasPrefix("iPhone://") && nsImage == nil {
+                if let img = iPhoneManager.shared.getThumbnail(for: item.filename) {
+                    self.nsImage = img
+                }
+            }
+        }
         .contextMenu {
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.selectFile(item.originalPath, inFileViewerRootedAtPath: "")
+            if isPicturesSection {
+                Button(isSelected ? "Deselect" : "Select") {
+                    onToggleSelect?()
+                }
+            }
+            if FileManager.default.fileExists(atPath: item.originalPath) {
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.selectFile(item.originalPath, inFileViewerRootedAtPath: "")
+                }
             }
             if let sha = item.sha256 {
                 Button("Copy SHA-256") {
@@ -207,7 +457,7 @@ public struct PhotoThumbnailCell: View {
                     NSPasteboard.general.setString(sha, forType: .string)
                 }
             }
-            if item.syncStatus == .uncommitted {
+            if item.syncStatus == .uncommitted && FileManager.default.fileExists(atPath: item.originalPath) {
                 Button("Sync to NAS Vault") {
                     Task {
                         _ = try? await NASClient.shared.uploadFile(item: item, sourceId: item.sourceId)
@@ -219,8 +469,16 @@ public struct PhotoThumbnailCell: View {
     
     private func loadThumbnail() {
         guard nsImage == nil else { return }
-        ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: size) { image in
-            self.nsImage = image
+        if item.originalPath.hasPrefix("iPhone://") {
+            if let cached = iPhoneManager.shared.getThumbnail(for: item.filename) {
+                self.nsImage = cached
+            } else {
+                iPhoneManager.shared.requestThumbnail(for: item.filename)
+            }
+        } else {
+            ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: size) { image in
+                self.nsImage = image
+            }
         }
     }
 }

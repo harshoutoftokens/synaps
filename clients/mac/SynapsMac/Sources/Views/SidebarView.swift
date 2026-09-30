@@ -9,15 +9,7 @@ public struct SidebarView: View {
             Section("Devices") {
                 if let phone = viewModel.phoneManager.connectedDevice {
                     Button {
-                        viewModel.selectSidebarItem(SidebarItem(
-                            id: "device_iphone",
-                            title: phone.name,
-                            icon: "iphone.gen3",
-                            section: .devices,
-                            path: nil,
-                            sourceId: "iphone_harsh",
-                            isPhone: true
-                        ))
+                        viewModel.selectPicturesSection()
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "iphone.gen3")
@@ -72,13 +64,24 @@ public struct SidebarView: View {
                     path: FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path
                 )
                 
-                folderRow(
-                    id: "folder_pictures",
-                    title: "Pictures",
-                    icon: "photo.fill",
-                    color: .pink,
-                    path: FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first?.path
-                )
+                Button {
+                    viewModel.selectPicturesSection()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .foregroundColor(.pink)
+                        Text("Pictures")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        if let phone = viewModel.phoneManager.connectedDevice, !viewModel.phoneManager.isDeviceLocked {
+                            Text("\(phone.totalItems)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 4)
             }
             
             // iPhone Albums (if any detected)

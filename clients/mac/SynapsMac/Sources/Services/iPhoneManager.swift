@@ -1,5 +1,6 @@
 import Foundation
 import ImageCaptureCore
+import AppKit
 
 public struct ConnectedPhoneInfo: Identifiable {
     public let id: String
@@ -9,23 +10,37 @@ public struct ConnectedPhoneInfo: Identifiable {
     public let totalItems: Int
 }
 
-public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDelegate, ICCameraDeviceDelegate {
+public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDelegate, ICCameraDeviceDelegate, ICCameraDeviceDownloadDelegate {
     public static let shared = iPhoneManager()
     
     @Published public var connectedDevice: ConnectedPhoneInfo?
     @Published public var isScanningPhone: Bool = false
+    @Published public var isDeviceLocked: Bool = false
     @Published public var phoneMediaItems: [SynapsFileItem] = []
     @Published public var detectedAlbums: [String] = []
     
+    @Published public var thumbnailsVersion: Int = 0
+    @Published public var isImporting: Bool = false
+    @Published public var importProgress: Double = 0.0
+    @Published public var importStatusMessage: String = ""
+    @Published public var importedItemsCount: Int = 0
+    
     private let browser = ICDeviceBrowser()
     private var activeCamera: ICCameraDevice?
-    private let stagingDir: URL
+    private var cameraFilesByName: [String: ICCameraFile] = [:]
+    private let thumbnailCache = NSCache<NSString, NSImage>()
+    private var activeDownloadContinuation: CheckedContinuation<URL?, Never>?
+    
+    public var importDirectoryURL: URL {
+        let pictures = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures", isDirectory: true)
+        return pictures.appendingPathComponent("Synaps Imports", isDirectory: true)
+    }
     
     public override init() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        self.stagingDir = home.appendingPathComponent(".config/synaps/staging_iphone", isDirectory: true)
         super.init()
-        try? FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        thumbnailCache.countLimit = 300
+        try? FileManager.default.createDirectory(at: importDirectoryURL, withIntermediateDirectories: true)
         startMonitoring()
     }
     
@@ -38,6 +53,16 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         browser.stop()
     }
     
+    public func checkDeviceStatus() {
+        guard let camera = activeCamera else { return }
+        DispatchQueue.main.async {
+            self.isDeviceLocked = camera.isLocked || camera.isAccessRestrictedAppleDevice
+        }
+        if !self.isDeviceLocked {
+            updateDeviceMediaList(camera)
+        }
+    }
+    
     // MARK: - ICDeviceBrowserDelegate
     public func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
         if let camera = device as? ICCameraDevice {
@@ -45,12 +70,15 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
             camera.delegate = self
             camera.requestOpenSession()
             
+            let locked = camera.isLocked || camera.isAccessRestrictedAppleDevice
+            
             DispatchQueue.main.async {
+                self.isDeviceLocked = locked
                 self.connectedDevice = ConnectedPhoneInfo(
                     id: camera.uuidString ?? UUID().uuidString,
                     name: camera.name ?? "iPhone",
                     model: "iOS Device",
-                    transportType: camera.transportType ?? "USB-C",
+                    transportType: camera.transportType ?? "USB",
                     totalItems: camera.mediaFiles?.count ?? 0
                 )
             }
@@ -60,8 +88,10 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     public func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
         if device == activeCamera {
             activeCamera = nil
+            cameraFilesByName.removeAll()
             DispatchQueue.main.async {
                 self.connectedDevice = nil
+                self.isDeviceLocked = false
                 self.phoneMediaItems = []
                 self.detectedAlbums = []
             }
@@ -73,6 +103,12 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         if let error = error {
             print("Error opening session to device: \(error.localizedDescription)")
             return
+        }
+        if let camera = device as? ICCameraDevice {
+            DispatchQueue.main.async {
+                self.isDeviceLocked = camera.isLocked || camera.isAccessRestrictedAppleDevice
+            }
+            updateDeviceMediaList(camera)
         }
     }
     
@@ -92,16 +128,65 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         updateDeviceMediaList(device)
     }
     
-    public func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {}
+    public func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {
+        guard let cgImage = thumbnail, let name = item.name else { return }
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: 160, height: 160))
+        thumbnailCache.setObject(nsImage, forKey: name as NSString)
+        DispatchQueue.main.async {
+            self.thumbnailsVersion += 1
+        }
+    }
+    
     public func cameraDevice(_ camera: ICCameraDevice, didReceiveMetadata metadata: [AnyHashable : Any]?, for item: ICCameraItem, error: Error?) {}
     public func cameraDevice(_ camera: ICCameraDevice, didRenameItems items: [ICCameraItem]) {}
     public func cameraDeviceDidChangeCapability(_ camera: ICCameraDevice) {}
     public func cameraDevice(_ camera: ICCameraDevice, didReceivePTPEvent eventData: Data) {}
-    public func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {}
-    public func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {}
     
+    public func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {
+        DispatchQueue.main.async {
+            self.isDeviceLocked = false
+        }
+        if let camera = self.activeCamera {
+            updateDeviceMediaList(camera)
+        }
+    }
+    
+    public func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {
+        DispatchQueue.main.async {
+            self.isDeviceLocked = true
+        }
+    }
+    
+    // MARK: - Thumbnail Retrieval
+    public func getThumbnail(for filename: String) -> NSImage? {
+        return thumbnailCache.object(forKey: filename as NSString)
+    }
+    
+    public func requestThumbnail(for filename: String) {
+        if thumbnailCache.object(forKey: filename as NSString) != nil {
+            return
+        }
+        if let file = cameraFilesByName[filename] {
+            file.requestThumbnail()
+        }
+    }
+    
+    // MARK: - Media List Update
     private func updateDeviceMediaList(_ camera: ICCameraDevice) {
+        let isLocked = camera.isLocked || camera.isAccessRestrictedAppleDevice
+        DispatchQueue.main.async {
+            self.isDeviceLocked = isLocked
+        }
+        guard !isLocked else { return }
         guard let files = camera.mediaFiles as? [ICCameraFile] else { return }
+        
+        var fileDict: [String: ICCameraFile] = [:]
+        for file in files {
+            if let name = file.name {
+                fileDict[name] = file
+            }
+        }
+        self.cameraFilesByName = fileDict
         
         DispatchQueue.global(qos: .userInitiated).async {
             var items: [SynapsFileItem] = []
@@ -119,7 +204,6 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
                 var isFav = false
                 var album: String? = nil
                 
-                // Check if already synced in local cache
                 if let cached = cacheStore.getRecord(for: virtualPath) {
                     if cached.size == fileSize {
                         status = cached.syncStatus == SyncStatus.committed.rawValue ? .committed : .uncommitted
@@ -168,5 +252,103 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
                 }
             }
         }
+    }
+    
+    // MARK: - Download / Import Implementation
+    private func downloadFile(_ cameraFile: ICCameraFile, to directoryURL: URL) async -> URL? {
+        guard let camera = activeCamera else { return nil }
+        
+        return await withCheckedContinuation { continuation in
+            self.activeDownloadContinuation = continuation
+            let options: [ICDownloadOption: Any] = [
+                .downloadsDirectoryURL: directoryURL,
+                .overwrite: true
+            ]
+            camera.requestDownloadFile(
+                cameraFile,
+                options: options,
+                downloadDelegate: self,
+                didDownloadSelector: #selector(didDownloadFile(_:error:options:contextInfo:)),
+                contextInfo: nil
+            )
+        }
+    }
+    
+    @objc public func didDownloadFile(_ file: ICCameraFile, error: Error?, options: [String: Any], contextInfo: UnsafeMutableRawPointer?) {
+        if let error = error {
+            print("Error downloading \(file.name ?? ""): \(error.localizedDescription)")
+            activeDownloadContinuation?.resume(returning: nil)
+            activeDownloadContinuation = nil
+            return
+        }
+        
+        let filename = file.name ?? "photo"
+        let dest = importDirectoryURL.appendingPathComponent(filename)
+        activeDownloadContinuation?.resume(returning: dest)
+        activeDownloadContinuation = nil
+    }
+    
+    @MainActor
+    public func importItems(filenames: [String]) async {
+        guard !filenames.isEmpty else { return }
+        guard activeCamera != nil else {
+            importStatusMessage = "No iPhone connected"
+            return
+        }
+        
+        let filesToDownload = filenames.compactMap { cameraFilesByName[$0] }
+        guard !filesToDownload.isEmpty else {
+            importStatusMessage = "No items matched for import"
+            return
+        }
+        
+        isImporting = true
+        importProgress = 0.0
+        importedItemsCount = 0
+        let total = filesToDownload.count
+        let destDir = importDirectoryURL
+        try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+        
+        for (index, file) in filesToDownload.enumerated() {
+            let name = file.name ?? "file"
+            importStatusMessage = "[\(index + 1)/\(total)] Importing \(name)..."
+            
+            if let downloadedURL = await downloadFile(file, to: destDir) {
+                importedItemsCount += 1
+                
+                // Hash and index into local cache store
+                if let sha = HashEngine.computeSHA256(for: downloadedURL.path) {
+                    let stat = try? FileManager.default.attributesOfItem(atPath: downloadedURL.path)
+                    let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
+                    LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
+                        path: downloadedURL.path,
+                        inode: inode,
+                        size: file.fileSize,
+                        mtime: Date().timeIntervalSince1970,
+                        sha256: sha,
+                        lastSyncedAt: nil,
+                        syncStatus: SyncStatus.uncommitted.rawValue,
+                        album: "iPhone Import",
+                        isFavorite: false
+                    ))
+                }
+            }
+            
+            importProgress = Double(index + 1) / Double(total)
+        }
+        
+        isImporting = false
+        importProgress = 1.0
+        importStatusMessage = "Imported \(importedItemsCount) of \(total) items to \(destDir.lastPathComponent)"
+        
+        notify(title: "Synaps Photos Import", message: "Successfully imported \(importedItemsCount) items.")
+    }
+    
+    private func notify(title: String, message: String) {
+        let script = "display notification \"\(message)\" with title \"\(title)\""
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", script]
+        try? p.run()
     }
 }
