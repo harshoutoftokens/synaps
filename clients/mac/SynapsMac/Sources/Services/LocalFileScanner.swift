@@ -64,7 +64,7 @@ public final class LocalFileScanner {
                     var album: String? = nil
                     
                     if isDir {
-                        // Directory item
+                        let folderStatus = self.evaluateFolderSyncStatus(folderPath: path)
                         let dirItem = SynapsFileItem(
                             id: path,
                             originalPath: path,
@@ -74,7 +74,7 @@ public final class LocalFileScanner {
                             modifiedAt: mtime,
                             createdAt: ctime,
                             sha256: nil,
-                            syncStatus: .uncommitted,
+                            syncStatus: folderStatus,
                             isDirectory: true,
                             isFavorite: false,
                             albumName: nil,
@@ -249,5 +249,47 @@ public final class LocalFileScanner {
         }
         
         return results
+    }
+    
+    public func evaluateFolderSyncStatus(folderPath: String) -> SyncStatus {
+        let url = SecurityBookmarkManager.shared.startAccessing(path: folderPath)
+        defer { SecurityBookmarkManager.shared.stopAccessing(path: folderPath) }
+        
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return .uncommitted
+        }
+        
+        var fileCount = 0
+        for case let fileURL as URL in enumerator {
+            guard let rv = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]),
+                  !(rv.isDirectory ?? false) else {
+                continue
+            }
+            
+            let filename = fileURL.lastPathComponent
+            let ext = fileURL.pathExtension.lowercased()
+            if self.ignoreFiles.contains(filename.lowercased()) || self.ignoreExtensions.contains(ext) {
+                continue
+            }
+            
+            fileCount += 1
+            let p = fileURL.path
+            let size = Int64(rv.fileSize ?? 0)
+            let mtime = rv.contentModificationDate ?? Date()
+            
+            guard let record = self.cacheStore.getRecord(for: p),
+                  record.syncStatus == SyncStatus.committed.rawValue,
+                  record.size == size,
+                  abs(record.mtime - mtime.timeIntervalSince1970) < 0.05 else {
+                return .uncommitted
+            }
+        }
+        
+        return fileCount > 0 ? .committed : .uncommitted
     }
 }

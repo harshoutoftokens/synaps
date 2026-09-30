@@ -168,19 +168,51 @@ public final class LocalCacheStore {
     public func markSynced(paths: [String], status: SyncStatus = .committed) {
         let now = Date().timeIntervalSince1970
         queue.sync {
-            let sql = "UPDATE local_files SET sync_status = ?, last_synced_at = ? WHERE path = ?;"
+            let sql = """
+            INSERT INTO local_files (path, sync_status, last_synced_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+                sync_status = excluded.sync_status,
+                last_synced_at = excluded.last_synced_at;
+            """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             defer { sqlite3_finalize(stmt) }
             
             for path in paths {
                 sqlite3_reset(stmt)
-                sqlite3_bind_text(stmt, 1, (status.rawValue as NSString).utf8String, -1, nil)
-                sqlite3_bind_double(stmt, 2, now)
-                sqlite3_bind_text(stmt, 3, (path as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 1, (path as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(stmt, 2, (status.rawValue as NSString).utf8String, -1, nil)
+                sqlite3_bind_double(stmt, 3, now)
                 sqlite3_step(stmt)
             }
         }
+    }
+    
+    public func recordItemSynced(
+        path: String,
+        fileSize: Int64,
+        modifiedAt: Date,
+        sha256: String?,
+        album: String? = nil,
+        isFavorite: Bool = false
+    ) {
+        let fileManager = FileManager.default
+        let stat = try? fileManager.attributesOfItem(atPath: path)
+        let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
+        let now = Date().timeIntervalSince1970
+        
+        saveRecord(CachedRecord(
+            path: path,
+            inode: inode,
+            size: fileSize,
+            mtime: modifiedAt.timeIntervalSince1970,
+            sha256: sha256,
+            lastSyncedAt: now,
+            syncStatus: SyncStatus.committed.rawValue,
+            album: album,
+            isFavorite: isFavorite
+        ))
     }
     
     public func logActivity(

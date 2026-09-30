@@ -460,9 +460,20 @@ public final class AppViewModel: ObservableObject {
             
             let dedupPaths = Set(res.results.filter { $0.status == "dedup_linked" }.map { $0.original_path })
             if !dedupPaths.isEmpty {
-                cacheStore.markSynced(paths: Array(dedupPaths), status: .committed)
-                
                 for p in dedupPaths {
+                    if let targetItem = uncommitted.first(where: { $0.originalPath == p }) {
+                        cacheStore.recordItemSynced(
+                            path: targetItem.originalPath,
+                            fileSize: targetItem.fileSize,
+                            modifiedAt: targetItem.modifiedAt,
+                            sha256: targetItem.sha256,
+                            album: targetItem.albumName,
+                            isFavorite: targetItem.isFavorite
+                        )
+                    } else {
+                        cacheStore.markSynced(paths: [p], status: .committed)
+                    }
+                    
                     let fn = (p as NSString).lastPathComponent
                     cacheStore.logActivity(
                         eventType: .existingDiscovered,
@@ -478,6 +489,13 @@ public final class AppViewModel: ObservableObject {
                 for i in 0..<fileItems.count {
                     if dedupPaths.contains(fileItems[i].originalPath) {
                         fileItems[i].syncStatus = .committed
+                    }
+                }
+                
+                // Re-evaluate folder sync statuses in current fileItems
+                for i in 0..<fileItems.count {
+                    if fileItems[i].isDirectory {
+                        fileItems[i].syncStatus = LocalFileScanner.shared.evaluateFolderSyncStatus(folderPath: fileItems[i].originalPath)
                     }
                 }
             }
@@ -504,6 +522,9 @@ public final class AppViewModel: ObservableObject {
     
     public func syncItem(_ item: SynapsFileItem) {
         if item.isDirectory {
+            if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
+                fileItems[idx].syncStatus = .syncing
+            }
             let files = LocalFileScanner.shared.scanDirectoryRecursively(
                 directoryPath: item.originalPath,
                 sourceLocation: item.sourceLocation,
@@ -511,6 +532,9 @@ public final class AppViewModel: ObservableObject {
             ).filter { $0.syncStatus != .committed }
             guard !files.isEmpty else {
                 syncStatusMessage = "All files in folder are already committed"
+                if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
+                    fileItems[idx].syncStatus = .committed
+                }
                 return
             }
             startSyncProcess(for: files, title: "Syncing folder \(item.filename)")
@@ -537,6 +561,9 @@ public final class AppViewModel: ObservableObject {
         
         for item in targets {
             if item.isDirectory {
+                if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
+                    fileItems[idx].syncStatus = .syncing
+                }
                 let dirFiles = LocalFileScanner.shared.scanDirectoryRecursively(
                     directoryPath: item.originalPath,
                     sourceLocation: item.sourceLocation,
@@ -558,6 +585,11 @@ public final class AppViewModel: ObservableObject {
         
         guard !toSync.isEmpty else {
             syncStatusMessage = "Selected items are already committed!"
+            for i in 0..<fileItems.count {
+                if fileItems[i].isDirectory {
+                    fileItems[i].syncStatus = LocalFileScanner.shared.evaluateFolderSyncStatus(folderPath: fileItems[i].originalPath)
+                }
+            }
             return
         }
         
@@ -618,7 +650,19 @@ public final class AppViewModel: ObservableObject {
                     for res in precheckResp.results {
                         if res.status == "dedup_linked" {
                             dedupPaths.insert(res.original_path)
-                            cacheStore.markSynced(paths: [res.original_path], status: .committed)
+                            if let targetItem = itemsWithSha.first(where: { $0.originalPath == res.original_path }) {
+                                cacheStore.recordItemSynced(
+                                    path: targetItem.originalPath,
+                                    fileSize: targetItem.fileSize,
+                                    modifiedAt: targetItem.modifiedAt,
+                                    sha256: targetItem.sha256,
+                                    album: targetItem.albumName,
+                                    isFavorite: targetItem.isFavorite
+                                )
+                            } else {
+                                cacheStore.markSynced(paths: [res.original_path], status: .committed)
+                            }
+                            
                             cacheStore.logActivity(
                                 eventType: .existingDiscovered,
                                 filePath: res.original_path,
@@ -661,7 +705,14 @@ public final class AppViewModel: ObservableObject {
                         let speed = (Double(item.fileSize) / (1024 * 1024)) / dt
                         self.syncSpeedMBs = speed
                         
-                        cacheStore.markSynced(paths: [item.originalPath], status: .committed)
+                        cacheStore.recordItemSynced(
+                            path: item.originalPath,
+                            fileSize: item.fileSize,
+                            modifiedAt: item.modifiedAt,
+                            sha256: item.sha256,
+                            album: item.albumName,
+                            isFavorite: item.isFavorite
+                        )
                         cacheStore.logActivity(
                             eventType: .fileSynced,
                             filePath: item.originalPath,
@@ -701,10 +752,17 @@ public final class AppViewModel: ObservableObject {
             }
             
             let elapsed = Date().timeIntervalSince(startTime)
-            self.isSyncing = false
-            self.syncProgress = 1.0
-            self.syncSpeedMBs = 0.0
-            self.syncStatusMessage = "Committed \(uploadedCount) files in \(String(format: "%.1f", elapsed))s"
+            await MainActor.run {
+                for i in 0..<self.fileItems.count {
+                    if self.fileItems[i].isDirectory {
+                        self.fileItems[i].syncStatus = LocalFileScanner.shared.evaluateFolderSyncStatus(folderPath: self.fileItems[i].originalPath)
+                    }
+                }
+                self.isSyncing = false
+                self.syncProgress = 1.0
+                self.syncSpeedMBs = 0.0
+                self.syncStatusMessage = "Committed \(uploadedCount) files in \(String(format: "%.1f", elapsed))s"
+            }
             
             cacheStore.logActivity(
                 eventType: .syncCompleted,
