@@ -262,16 +262,34 @@ public struct PhotosGridView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(viewModel.filteredItems) { item in
-                            PhotoThumbnailCell(item: item, size: gridSize, onDoubleClick: {
-                                if item.isDirectory {
-                                    viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
-                                } else {
-                                    let url = URL(fileURLWithPath: item.originalPath)
-                                    if FileManager.default.fileExists(atPath: item.originalPath) {
-                                        NSWorkspace.shared.open(url)
+                            PhotoThumbnailCell(
+                                item: item,
+                                size: gridSize,
+                                isPicturesSection: false,
+                                isSelected: viewModel.selectedItemIds.contains(item.id),
+                                onToggleSelect: {
+                                    let flags = NSEvent.modifierFlags
+                                    viewModel.handleItemClick(item, commandKey: flags.contains(.command), shiftKey: flags.contains(.shift))
+                                },
+                                onDoubleClick: {
+                                    if item.isDirectory {
+                                        viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
+                                    } else {
+                                        let url = URL(fileURLWithPath: item.originalPath)
+                                        if FileManager.default.fileExists(atPath: item.originalPath) {
+                                            NSWorkspace.shared.open(url)
+                                        }
                                     }
-                                }
-                            })
+                                },
+                                onSync: {
+                                    if !viewModel.selectedItemIds.isEmpty && (viewModel.selectedItemIds.contains(item.id) || viewModel.selectedItemIds.count > 1) {
+                                        viewModel.syncSelectedItems()
+                                    } else {
+                                        viewModel.syncItem(item)
+                                    }
+                                },
+                                selectedCount: viewModel.selectedItemIds.count
+                            )
                         }
                     }
                     .padding(14)
@@ -303,6 +321,8 @@ public struct PhotoThumbnailCell: View {
     public var isSelected: Bool = false
     public var onToggleSelect: (() -> Void)? = nil
     public var onDoubleClick: (() -> Void)? = nil
+    public var onSync: (() -> Void)? = nil
+    public var selectedCount: Int = 0
     
     @State private var nsImage: NSImage?
     @State private var isHovered = false
@@ -417,14 +437,15 @@ public struct PhotoThumbnailCell: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .truncationMode(.middle)
-                .foregroundColor(isSelected ? .accentColor : (isHovered ? .accentColor : .primary))
+                .foregroundColor(isSelected ? .white : (isHovered ? .accentColor : .primary))
+                .padding(.horizontal, isSelected ? 4 : 0)
+                .padding(.vertical, isSelected ? 1 : 0)
+                .background(isSelected ? RoundedRectangle(cornerRadius: 4).fill(Color.accentColor) : nil)
                 .frame(width: size + 16, alignment: .top)
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if isPicturesSection {
-                onToggleSelect?()
-            }
+            onToggleSelect?()
         }
         .onTapGesture(count: 2) {
             onDoubleClick?()
@@ -457,11 +478,9 @@ public struct PhotoThumbnailCell: View {
                     NSPasteboard.general.setString(sha, forType: .string)
                 }
             }
-            if item.syncStatus == .uncommitted && FileManager.default.fileExists(atPath: item.originalPath) {
-                Button("Sync to NAS Vault") {
-                    Task {
-                        _ = try? await NASClient.shared.uploadFile(item: item, sourceId: item.sourceId)
-                    }
+            if item.syncStatus != .committed && FileManager.default.fileExists(atPath: item.originalPath) {
+                Button(selectedCount > 1 ? "Sync Selected (\(selectedCount)) to NAS" : "Sync to NAS") {
+                    onSync?()
                 }
             }
         }

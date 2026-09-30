@@ -85,6 +85,7 @@ public struct FileListView: View {
                 Spacer()
             } else {
                 List(viewModel.filteredItems) { item in
+                    let isSelected = viewModel.selectedItemIds.contains(item.id)
                     HStack(spacing: 12) {
                         // File Icon with Badge
                         ZStack(alignment: .bottomTrailing) {
@@ -100,6 +101,8 @@ public struct FileListView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.filename)
                                 .font(.body)
+                                .fontWeight(isSelected ? .semibold : .regular)
+                                .foregroundColor(isSelected ? .accentColor : .primary)
                                 .lineLimit(1)
                             
                             HStack(spacing: 8) {
@@ -133,8 +136,15 @@ public struct FileListView: View {
                         .background(item.syncStatus.color.opacity(0.12))
                         .cornerRadius(12)
                     }
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 4)
+                    .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                    .cornerRadius(6)
                     .contentShape(Rectangle())
+                    .onTapGesture {
+                        let flags = NSEvent.modifierFlags
+                        viewModel.handleItemClick(item, commandKey: flags.contains(.command), shiftKey: flags.contains(.shift))
+                    }
                     .onTapGesture(count: 2) {
                         if item.isDirectory {
                             viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
@@ -152,11 +162,13 @@ public struct FileListView: View {
                                 NSPasteboard.general.setString(sha, forType: .string)
                             }
                         }
-                        if item.syncStatus == .uncommitted {
-                            Button("Sync this file to NAS") {
-                                Task {
-                                    _ = try? await NASClient.shared.uploadFile(item: item, sourceId: item.sourceId)
-                                }
+                        if !viewModel.selectedItemIds.isEmpty && (viewModel.selectedItemIds.contains(item.id) || viewModel.selectedItemIds.count > 1) {
+                            Button("Sync Selected (\(viewModel.selectedItemIds.count)) to NAS") {
+                                viewModel.syncSelectedItems()
+                            }
+                        } else if item.syncStatus != .committed {
+                            Button("Sync to NAS") {
+                                viewModel.syncItem(item)
                             }
                         }
                     }
