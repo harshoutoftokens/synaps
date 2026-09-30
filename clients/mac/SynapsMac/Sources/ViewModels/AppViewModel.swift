@@ -26,6 +26,12 @@ public final class AppViewModel: ObservableObject {
         selectedSidebarItem?.id == "section_pictures" || selectedSidebarItem?.isPhone == true
     }
     
+    public var isNASSection: Bool {
+        selectedSidebarItem?.isNAS == true
+    }
+    
+    @Published public var currentNASRelativePath: String = ""
+    
     public enum SortField: String, CaseIterable, Identifiable {
         case name = "Name"
         case dateModified = "Date Modified"
@@ -290,6 +296,9 @@ public final class AppViewModel: ObservableObject {
         if item.isPhone {
             self.fileItems = phoneManager.phoneMediaItems
             self.currentFolderPath = "iPhone"
+        } else if item.isNAS {
+            self.currentFolderPath = "Home Cloud"
+            loadNASFolder(path: "")
         } else if let path = item.path {
             loadFolder(path: path, sourceLocation: item.title, sourceId: item.sourceId)
         }
@@ -414,6 +423,12 @@ public final class AppViewModel: ObservableObject {
     }
     
     public func navigateIntoFolder(path: String, title: String, sourceId: String) {
+        if isNASSection || path.hasPrefix("nas://") {
+            navigationHistory.append(currentNASRelativePath)
+            let relativePath = path.replacingOccurrences(of: "nas://", with: "")
+            loadNASFolder(path: relativePath)
+            return
+        }
         if !currentFolderPath.isEmpty {
             navigationHistory.append(currentFolderPath)
         }
@@ -422,8 +437,101 @@ public final class AppViewModel: ObservableObject {
     
     public func navigateBack() {
         guard let prev = navigationHistory.popLast() else { return }
+        if isNASSection {
+            loadNASFolder(path: prev)
+            return
+        }
         let title = (prev as NSString).lastPathComponent
         loadFolder(path: prev, sourceLocation: title, sourceId: selectedSidebarItem?.sourceId ?? "mac_harsh")
+    }
+    
+    public func loadNASFolder(path: String = "") {
+        self.currentNASRelativePath = path
+        self.currentFolderPath = path.isEmpty ? "Home Cloud" : "Home Cloud/\(path)"
+        self.isLoading = true
+        self.fileItems = []
+        self.selectedItemIds.removeAll()
+        
+        Task {
+            if !self.nasOnline {
+                await self.checkNASStatus()
+            }
+            
+            guard self.nasOnline else {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.syncStatusMessage = "Home Cloud is offline"
+                }
+                return
+            }
+            
+            do {
+                let resp = try await self.nasClient.browseDirectory(path: path)
+                let dateFormatter = ISO8601DateFormatter()
+                dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let fallbackFormatter = ISO8601DateFormatter()
+                
+                var items: [SynapsFileItem] = []
+                
+                for folder in resp.folders {
+                    let date = folder.modified.flatMap { dateFormatter.date(from: $0) ?? fallbackFormatter.date(from: $0) } ?? Date()
+                    let item = SynapsFileItem(
+                        id: "nas://" + folder.path,
+                        originalPath: "nas://" + folder.path,
+                        filename: folder.name,
+                        fileSize: 0,
+                        sourceLocation: "Home Cloud",
+                        modifiedAt: date,
+                        createdAt: date,
+                        sha256: nil,
+                        syncStatus: .committed,
+                        isDirectory: true,
+                        isFavorite: false,
+                        albumName: nil,
+                        sourceId: "nas_homecloud",
+                        isLivePhotoVideo: false
+                    )
+                    items.append(item)
+                }
+                
+                for file in resp.files {
+                    let date = file.modified.flatMap { dateFormatter.date(from: $0) ?? fallbackFormatter.date(from: $0) } ?? Date()
+                    let ext = (file.name as NSString).pathExtension.lowercased()
+                    let item = SynapsFileItem(
+                        id: "nas://" + file.path,
+                        originalPath: "nas://" + file.path,
+                        filename: file.name,
+                        fileSize: file.size,
+                        sourceLocation: "Home Cloud",
+                        modifiedAt: date,
+                        createdAt: date,
+                        sha256: nil,
+                        syncStatus: .committed,
+                        isDirectory: false,
+                        isFavorite: false,
+                        albumName: nil,
+                        sourceId: "nas_homecloud",
+                        isLivePhotoVideo: ext == "mov"
+                    )
+                    items.append(item)
+                }
+                
+                items.sort {
+                    $0.filename.localizedStandardCompare($1.filename) == .orderedAscending
+                }
+                
+                await MainActor.run {
+                    self.fileItems = items
+                    self.isLoading = false
+                    self.syncStatusMessage = "Home Cloud: \(resp.total_folders) folders, \(resp.total_files) files"
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.syncStatusMessage = "Failed to load NAS contents: \(error.localizedDescription)"
+                }
+            }
+        }
     }
     
     public func loadFolder(path: String, sourceLocation: String, sourceId: String) {

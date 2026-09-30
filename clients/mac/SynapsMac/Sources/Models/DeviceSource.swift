@@ -18,6 +18,7 @@ public struct SidebarItem: Identifiable, Hashable {
     public let sourceId: String
     public let badgeCount: Int?
     public let isPhone: Bool
+    public let isNAS: Bool
     
     public init(
         id: String,
@@ -27,7 +28,8 @@ public struct SidebarItem: Identifiable, Hashable {
         path: String? = nil,
         sourceId: String = "mac_harsh",
         badgeCount: Int? = nil,
-        isPhone: Bool = false
+        isPhone: Bool = false,
+        isNAS: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -37,5 +39,6 @@ public struct SidebarItem: Identifiable, Hashable {
         self.sourceId = sourceId
         self.badgeCount = badgeCount
         self.isPhone = isPhone
+        self.isNAS = isNAS
     }
 }

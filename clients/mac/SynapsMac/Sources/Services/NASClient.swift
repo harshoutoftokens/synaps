@@ -43,6 +43,36 @@ public struct AlbumSyncPayload: Codable {
     public let original_paths: [String]
 }
 
+public struct NASFolderItem: Codable {
+    public let name: String
+    public let path: String
+    public let type: String
+    public let children_count: Int?
+    public let modified: String?
+}
+
+public struct NASFileItem: Codable {
+    public let name: String
+    public let path: String
+    public let type: String
+    public let file_type: String?
+    public let `extension`: String?
+    public let mime_type: String?
+    public let size: Int64
+    public let size_human: String?
+    public let modified: String?
+}
+
+public struct NASBrowseResponse: Codable {
+    public let current_path: String
+    public let folders: [NASFolderItem]
+    public let files: [NASFileItem]
+    public let total_folders: Int
+    public let total_files: Int
+    public let page: Int
+    public let per_page: Int
+}
+
 public final class NASClient {
     public static let shared = NASClient()
     private var activeBaseUrl: String = "http://192.168.0.105:8000"
@@ -275,5 +305,30 @@ public final class NASClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(payload)
         _ = try await URLSession.shared.data(for: req)
+    }
+    
+    public func browseDirectory(path: String = "") async throws -> NASBrowseResponse {
+        var components = URLComponents(string: "\(activeBaseUrl)/api/finder/browse")
+        var queryItems = [URLQueryItem(name: "per_page", value: "500")]
+        if !path.isEmpty {
+            queryItems.append(URLQueryItem(name: "path", value: path))
+        }
+        components?.queryItems = queryItems
+        
+        guard let url = components?.url else {
+            throw URLError(.badURL)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 5.0
+        config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let session = URLSession(configuration: config)
+        
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        
+        return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
     }
 }

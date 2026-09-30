@@ -15,7 +15,35 @@ public struct MainView: View {
         } detail: {
             VStack(spacing: 0) {
                 // Main Content View
-                if viewModel.selectedSidebarItem?.isPhone == true || displayMode == .grid {
+                if viewModel.isNASSection && !viewModel.nasOnline {
+                    VStack(spacing: 16) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 48))
+                            .foregroundColor(.secondary)
+                        Text("Home Cloud is Offline")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("Unable to reach NAS at \(viewModel.nasBaseUrl)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Button {
+                            Task {
+                                await viewModel.checkNASStatus()
+                                if viewModel.nasOnline {
+                                    viewModel.loadNASFolder(path: viewModel.currentNASRelativePath)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                SpinningRefreshIcon(isSpinning: viewModel.isCheckingNAS)
+                                Text(viewModel.isCheckingNAS ? "Reconnecting..." : "Reconnect")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isCheckingNAS)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.selectedSidebarItem?.isPhone == true || displayMode == .grid {
                     PhotosGridView(viewModel: viewModel)
                 } else {
                     FileListView(viewModel: viewModel)
@@ -25,7 +53,7 @@ public struct MainView: View {
                 SyncStatusBar(viewModel: viewModel)
             }
             .navigationTitle(viewModel.selectedSidebarItem?.title ?? "Synaps")
-            .navigationSubtitle(viewModel.selectedSidebarItem?.path ?? "")
+            .navigationSubtitle(viewModel.isNASSection ? viewModel.currentFolderPath : (viewModel.selectedSidebarItem?.path ?? ""))
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     // Filter Picker (All / 🔴 Uncommitted / 🟢 Committed)

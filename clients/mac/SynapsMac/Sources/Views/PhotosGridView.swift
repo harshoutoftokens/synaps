@@ -516,6 +516,8 @@ public struct PhotoThumbnailCell: View {
             } else {
                 iPhoneManager.shared.requestThumbnail(for: item.filename)
             }
+        } else if item.originalPath.hasPrefix("nas://") {
+            return
         } else {
             ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: size) { image in
                 self.nsImage = image
