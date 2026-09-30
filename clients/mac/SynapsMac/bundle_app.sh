@@ -45,20 +45,8 @@ cat << 'EOF' > "$APP_BUNDLE/Contents/Info.plist"
     <string>NSApplication</string>
     <key>NSCameraUsageDescription</key>
     <string>Synaps accesses connected iOS devices to ingest media.</string>
-    <key>NSDesktopFolderUsageDescription</key>
-    <string>Synaps requires access to your Desktop folder to index and synchronize your files.</string>
-    <key>NSDocumentsFolderUsageDescription</key>
-    <string>Synaps requires access to your Documents folder to index and synchronize your files.</string>
-    <key>NSDownloadsFolderUsageDescription</key>
-    <string>Synaps requires access to your Downloads folder to index and synchronize your files.</string>
 </dict>
 </plist>
 EOF
 
-if [ -f "$DIR/Entitlements.plist" ]; then
-    echo "🔏 Signing with entitlements..."
-    codesign --force --deep --sign - --entitlements "$DIR/Entitlements.plist" "$APP_BUNDLE"
-fi
-
 echo "✨ SynapsMac.app created successfully at: $APP_BUNDLE"
-
