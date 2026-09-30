@@ -52,9 +52,22 @@ public final class AppViewModel: ObservableObject {
     public init() {
         setupPhoneObserver()
         setupScannerObserver()
+        setupSelectionNotifications()
         Task {
             await checkNASStatus()
             loadDefaultFolder()
+        }
+    }
+    
+    private func setupSelectionNotifications() {
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("ClearSelectionNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.clearSelection()
+            }
         }
     }
     
