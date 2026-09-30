@@ -72,11 +72,9 @@ public struct MainView: View {
                         Section("Sort By") {
                             ForEach(AppViewModel.SortField.allCases) { field in
                                 Button {
-                                    if viewModel.sortField == field {
-                                        viewModel.sortAscending.toggle()
-                                    } else {
+                                    if viewModel.sortField != field {
                                         viewModel.sortField = field
-                                        viewModel.sortAscending = (field == .name || field == .kind || field == .dateCreated)
+                                        viewModel.sortAscending = (field == .name || field == .kind)
                                     }
                                 } label: {
                                     HStack {
@@ -95,7 +93,7 @@ public struct MainView: View {
                                 viewModel.sortAscending = true
                             } label: {
                                 HStack {
-                                    Text("Ascending")
+                                    Text(ascendingLabel(for: viewModel.sortField))
                                     if viewModel.sortAscending {
                                         Spacer()
                                         Image(systemName: "checkmark")
@@ -107,7 +105,7 @@ public struct MainView: View {
                                 viewModel.sortAscending = false
                             } label: {
                                 HStack {
-                                    Text("Descending")
+                                    Text(descendingLabel(for: viewModel.sortField))
                                     if !viewModel.sortAscending {
                                         Spacer()
                                         Image(systemName: "checkmark")
@@ -118,7 +116,7 @@ public struct MainView: View {
                     } label: {
                         Image(systemName: "arrow.up.arrow.down")
                     }
-                    .help("Sort items by \(viewModel.sortField.rawValue) (\(viewModel.sortAscending ? "Ascending" : "Descending"))")
+                    .help("Sort items by \(viewModel.sortField.rawValue) (\(viewModel.sortAscending ? ascendingLabel(for: viewModel.sortField) : descendingLabel(for: viewModel.sortField)))")
                     
                     // Quick Look Button
                     Button {
@@ -154,5 +152,23 @@ public struct MainView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+    }
+    
+    private func ascendingLabel(for field: AppViewModel.SortField) -> String {
+        switch field {
+        case .name: return "A to Z"
+        case .dateModified, .dateCreated: return "Oldest First"
+        case .size: return "Smallest First"
+        case .kind: return "Folders First (A to Z)"
+        }
+    }
+    
+    private func descendingLabel(for field: AppViewModel.SortField) -> String {
+        switch field {
+        case .name: return "Z to A"
+        case .dateModified, .dateCreated: return "Newest First"
+        case .size: return "Largest First"
+        case .kind: return "Folders Last (Z to A)"
+        }
     }
 }

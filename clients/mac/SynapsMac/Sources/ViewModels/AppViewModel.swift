@@ -17,7 +17,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var searchQuery: String = ""
     @Published public var filterSelection: FilterOption = .all
     @Published public var sortField: SortField = .dateCreated
-    @Published public var sortAscending: Bool = true
+    @Published public var sortAscending: Bool = false
     @Published public var selectedItemIds: Set<String> = []
     @Published public var recentActivities: [SyncActivityItem] = []
     @Published public var showActivityLog: Bool = false
