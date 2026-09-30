@@ -16,11 +16,12 @@ public final class AppViewModel: ObservableObject {
     @Published public var nasBaseUrl: String = NASClient.shared.getBaseUrl()
     @Published public var searchQuery: String = ""
     @Published public var filterSelection: FilterOption = .all
-    @Published public var sortField: SortField = .name
+    @Published public var sortField: SortField = .dateCreated
     @Published public var sortAscending: Bool = true
     @Published public var selectedItemIds: Set<String> = []
     @Published public var recentActivities: [SyncActivityItem] = []
     @Published public var showActivityLog: Bool = false
+    @Published public var collapsedKinds: Set<String> = []
     
     public var isPicturesSection: Bool {
         selectedSidebarItem?.id == "section_pictures" || selectedSidebarItem?.isPhone == true
@@ -40,6 +41,71 @@ public final class AppViewModel: ObservableObject {
         case kind = "Kind"
         
         public var id: String { rawValue }
+    }
+    
+    public enum FileKindGroup: String, CaseIterable, Identifiable {
+        case folders = "Folders"
+        case images = "Images"
+        case videos = "Videos"
+        case documents = "Documents"
+        case audio = "Audio"
+        case archives = "Archives"
+        case code = "Developer"
+        case other = "Other"
+        
+        public var id: String { rawValue }
+        
+        public static func kind(for item: SynapsFileItem) -> FileKindGroup {
+            if item.isDirectory { return .folders }
+            let ext = (item.filename as NSString).pathExtension.lowercased()
+            switch ext {
+            case "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp", "svg", "raw", "cr2", "nef", "ico", "icns":
+                return .images
+            case "mp4", "mov", "m4v", "mkv", "avi", "wmv", "flv", "webm", "3gp":
+                return .videos
+            case "pdf", "doc", "docx", "txt", "rtf", "xls", "xlsx", "ppt", "pptx", "pages", "numbers", "keynote", "csv", "md", "markdown":
+                return .documents
+            case "mp3", "wav", "m4a", "aac", "flac", "aiff", "ogg", "wma", "alac":
+                return .audio
+            case "zip", "tar", "gz", "tgz", "bz2", "7z", "rar", "dmg", "pkg", "iso":
+                return .archives
+            case "swift", "py", "js", "ts", "jsx", "tsx", "html", "css", "json", "xml", "yaml", "yml", "sh", "c", "cpp", "h", "rs", "go", "sql", "java", "kt", "rb", "php":
+                return .code
+            default:
+                return .other
+            }
+        }
+    }
+    
+    public struct FileGroup: Identifiable {
+        public let kind: FileKindGroup
+        public let items: [SynapsFileItem]
+        public var id: String { kind.rawValue }
+    }
+    
+    public func toggleKindCollapsed(_ kind: String) {
+        if collapsedKinds.contains(kind) {
+            collapsedKinds.remove(kind)
+        } else {
+            collapsedKinds.insert(kind)
+        }
+    }
+    
+    public func isKindCollapsed(_ kind: String) -> Bool {
+        return collapsedKinds.contains(kind)
+    }
+    
+    public var groupedItemsByKind: [FileGroup] {
+        let allFiltered = filteredItems
+        var groups: [FileGroup] = []
+        let kinds = sortAscending ? FileKindGroup.allCases : FileKindGroup.allCases.reversed()
+        for kind in kinds {
+            let matching = allFiltered.filter { FileKindGroup.kind(for: $0) == kind }
+            if !matching.isEmpty {
+                groups.append(FileGroup(kind: kind, items: matching))
+            }
+        }
+        return groups
     }
     
     public enum FilterOption: String, CaseIterable, Identifiable {
@@ -224,16 +290,14 @@ public final class AppViewModel: ObservableObject {
                     comparison = .orderedSame
                 }
             case .kind:
-                let extA = (a.filename as NSString).pathExtension.lowercased()
-                let extB = (b.filename as NSString).pathExtension.lowercased()
-                if extA.isEmpty && !extB.isEmpty {
-                    comparison = .orderedDescending
-                } else if !extA.isEmpty && extB.isEmpty {
-                    comparison = .orderedAscending
-                } else if extA == extB {
-                    comparison = a.filename.localizedStandardCompare(b.filename)
+                let groupA = FileKindGroup.kind(for: a)
+                let groupB = FileKindGroup.kind(for: b)
+                if groupA != groupB {
+                    let indexA = FileKindGroup.allCases.firstIndex(of: groupA) ?? 0
+                    let indexB = FileKindGroup.allCases.firstIndex(of: groupB) ?? 0
+                    comparison = indexA < indexB ? .orderedAscending : .orderedDescending
                 } else {
-                    comparison = extA.localizedStandardCompare(extB)
+                    comparison = a.filename.localizedStandardCompare(b.filename)
                 }
             }
             
@@ -529,6 +593,38 @@ public final class AppViewModel: ObservableObject {
                 await MainActor.run {
                     self.isLoading = false
                     self.syncStatusMessage = "Failed to load NAS contents: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    public func downloadNASItem(_ item: SynapsFileItem) {
+        guard isNASSection && !item.isDirectory else { return }
+        let relativePath = item.originalPath.replacingOccurrences(of: "nas://", with: "")
+        let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Downloads")
+        let destUrl = downloadsDir.appendingPathComponent(item.filename)
+        
+        syncStatusMessage = "Downloading \(item.filename)..."
+        Task {
+            do {
+                let success = try await nasClient.downloadFile(relativePath: relativePath, destinationURL: destUrl)
+                await MainActor.run {
+                    if success {
+                        self.syncStatusMessage = "Downloaded \(item.filename) to Downloads"
+                        self.cacheStore.logActivity(
+                            eventType: .fileSynced,
+                            filePath: destUrl.path,
+                            filename: item.filename,
+                            details: "Downloaded from Home Cloud to Downloads"
+                        )
+                        self.loadRecentActivities()
+                    } else {
+                        self.syncStatusMessage = "Failed to download \(item.filename)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.syncStatusMessage = "Download failed: \(error.localizedDescription)"
                 }
             }
         }

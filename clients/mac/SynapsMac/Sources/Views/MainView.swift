@@ -57,13 +57,15 @@ public struct MainView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     // Filter Picker (All / 🔴 Uncommitted / 🟢 Committed)
-                    Picker("Filter", selection: $viewModel.filterSelection) {
-                        ForEach(AppViewModel.FilterOption.allCases) { opt in
-                            Text(opt.rawValue).tag(opt)
+                    if !viewModel.isNASSection {
+                        Picker("Filter", selection: $viewModel.filterSelection) {
+                            ForEach(AppViewModel.FilterOption.allCases) { opt in
+                                Text(opt.rawValue).tag(opt)
+                            }
                         }
+                        .pickerStyle(.menu)
+                        .frame(width: 160)
                     }
-                    .pickerStyle(.menu)
-                    .frame(width: 160)
                     
                     // Sort Menu
                     Menu {
@@ -74,7 +76,7 @@ public struct MainView: View {
                                         viewModel.sortAscending.toggle()
                                     } else {
                                         viewModel.sortField = field
-                                        viewModel.sortAscending = (field == .name || field == .kind)
+                                        viewModel.sortAscending = (field == .name || field == .kind || field == .dateCreated)
                                     }
                                 } label: {
                                     HStack {

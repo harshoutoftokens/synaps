@@ -331,4 +331,25 @@ public final class NASClient {
         
         return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
     }
+    
+    public func downloadFile(relativePath: String, destinationURL: URL) async throws -> Bool {
+        var components = URLComponents(string: "\(activeBaseUrl)/api/finder/download")
+        components?.queryItems = [URLQueryItem(name: "path", value: relativePath)]
+        
+        guard let url = components?.url else {
+            throw URLError(.badURL)
+        }
+        
+        let (tempUrl, response) = try await URLSession.shared.download(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            return false
+        }
+        
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try? FileManager.default.removeItem(at: destinationURL)
+        }
+        
+        try FileManager.default.moveItem(at: tempUrl, to: destinationURL)
+        return true
+    }
 }
