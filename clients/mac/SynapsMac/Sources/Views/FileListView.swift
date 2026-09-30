@@ -187,6 +187,13 @@ public struct FileListView: View {
                     }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
+                .background(
+                    Color(nsColor: .controlBackgroundColor)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.clearSelection()
+                        }
+                )
             }
         }
     }

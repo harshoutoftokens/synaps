@@ -260,44 +260,61 @@ public struct PhotosGridView: View {
                 Spacer()
             } else {
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 14) {
-                        ForEach(viewModel.filteredItems) { item in
-                            PhotoThumbnailCell(
-                                item: item,
-                                size: gridSize,
-                                isPicturesSection: false,
-                                isSelected: viewModel.selectedItemIds.contains(item.id),
-                                onToggleSelect: {
-                                    let flags = NSEvent.modifierFlags
-                                    viewModel.handleItemClick(
-                                        item,
-                                        commandKey: flags.contains(.command),
-                                        shiftKey: flags.contains(.shift),
-                                        onDoubleClick: {
-                                            if item.isDirectory {
-                                                viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
-                                            } else {
-                                                let url = URL(fileURLWithPath: item.originalPath)
-                                                if FileManager.default.fileExists(atPath: item.originalPath) {
-                                                    NSWorkspace.shared.open(url)
+                    ZStack(alignment: .topLeading) {
+                        // Background canvas to capture empty space clicks
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                viewModel.clearSelection()
+                            }
+                        
+                        LazyVGrid(columns: columns, spacing: 14) {
+                            ForEach(viewModel.filteredItems) { item in
+                                PhotoThumbnailCell(
+                                    item: item,
+                                    size: gridSize,
+                                    isPicturesSection: false,
+                                    isSelected: viewModel.selectedItemIds.contains(item.id),
+                                    onToggleSelect: {
+                                        let flags = NSEvent.modifierFlags
+                                        viewModel.handleItemClick(
+                                            item,
+                                            commandKey: flags.contains(.command),
+                                            shiftKey: flags.contains(.shift),
+                                            onDoubleClick: {
+                                                if item.isDirectory {
+                                                    viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
+                                                } else {
+                                                    let url = URL(fileURLWithPath: item.originalPath)
+                                                    if FileManager.default.fileExists(atPath: item.originalPath) {
+                                                        NSWorkspace.shared.open(url)
+                                                    }
                                                 }
                                             }
+                                        )
+                                    },
+                                    onSync: {
+                                        if !viewModel.selectedItemIds.isEmpty && (viewModel.selectedItemIds.contains(item.id) || viewModel.selectedItemIds.count > 1) {
+                                            viewModel.syncSelectedItems()
+                                        } else {
+                                            viewModel.syncItem(item)
                                         }
-                                    )
-                                },
-                                onSync: {
-                                    if !viewModel.selectedItemIds.isEmpty && (viewModel.selectedItemIds.contains(item.id) || viewModel.selectedItemIds.count > 1) {
-                                        viewModel.syncSelectedItems()
-                                    } else {
-                                        viewModel.syncItem(item)
-                                    }
-                                },
-                                selectedCount: viewModel.selectedItemIds.count
-                            )
+                                    },
+                                    selectedCount: viewModel.selectedItemIds.count
+                                )
+                            }
                         }
+                        .padding(14)
                     }
-                    .padding(14)
+                    .frame(maxWidth: .infinity, minHeight: 600, alignment: .topLeading)
                 }
+                .background(
+                    Color(nsColor: .windowBackgroundColor)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.clearSelection()
+                        }
+                )
             }
         }
     }

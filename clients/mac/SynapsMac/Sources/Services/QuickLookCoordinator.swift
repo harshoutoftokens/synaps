@@ -72,6 +72,21 @@ public final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLP
                 }
             }
             
+            // Key code 53 is Escape
+            if event.keyCode == 53 {
+                if let responder = event.window?.firstResponder,
+                   responder is NSTextView || responder is NSTextField {
+                    return event
+                }
+                
+                if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible {
+                    panel.orderOut(nil)
+                    return nil
+                }
+                
+                NotificationCenter.default.post(name: NSNotification.Name("ClearSelectionNotification"), object: nil)
+            }
+            
             return event
         }
     }
