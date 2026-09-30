@@ -101,24 +101,44 @@ public struct SidebarView: View {
             // NAS Status Section
             Section("NAS Network") {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(viewModel.nasOnline ? Color.green : Color.red)
-                        .frame(width: 8, height: 8)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(viewModel.nasOnline ? "homecloud1" : "NAS Offline")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Text(viewModel.nasBaseUrl)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                    Button {
+                        let item = SidebarItem(
+                            id: "section_nas",
+                            title: "Home Cloud",
+                            icon: "server.rack",
+                            section: .devices,
+                            path: "",
+                            sourceId: "nas_homecloud",
+                            isNAS: true
+                        )
+                        viewModel.selectSidebarItem(item)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(viewModel.nasOnline ? Color.green : Color.red)
+                                .frame(width: 8, height: 8)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(viewModel.nasOnline ? "Home Cloud (homecloud1)" : "Home Cloud (Offline)")
+                                    .font(.subheadline)
+                                    .fontWeight(viewModel.selectedSidebarItem?.id == "section_nas" ? .bold : .medium)
+                                    .foregroundColor(viewModel.selectedSidebarItem?.id == "section_nas" ? .accentColor : .primary)
+                                Text(viewModel.nasBaseUrl)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                        }
                     }
-                    
-                    Spacer()
+                    .buttonStyle(.plain)
                     
                     Button {
                         Task {
                             await viewModel.checkNASStatus()
+                            if viewModel.selectedSidebarItem?.isNAS == true {
+                                viewModel.loadNASFolder(path: viewModel.currentNASRelativePath)
+                            }
                         }
                     } label: {
                         SpinningRefreshIcon(isSpinning: viewModel.isCheckingNAS)

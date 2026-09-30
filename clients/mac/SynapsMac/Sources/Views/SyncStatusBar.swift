@@ -7,7 +7,14 @@ public struct SyncStatusBar: View {
         HStack(spacing: 16) {
             // Status and Uncommitted Summary
             HStack(spacing: 8) {
-                if viewModel.isSyncing {
+                if viewModel.isNASSection {
+                    Image(systemName: "server.rack")
+                        .foregroundColor(.accentColor)
+                    Text("\(viewModel.fileItems.count) items on Home Cloud")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                } else if viewModel.isSyncing {
                     ProgressView()
                         .scaleEffect(0.7)
                         .frame(width: 16, height: 16)
@@ -61,37 +68,39 @@ public struct SyncStatusBar: View {
                 }
             }
             
-            // Sync Selected Action Button
-            if !viewModel.selectedItemIds.isEmpty {
+            if !viewModel.isNASSection {
+                // Sync Selected Action Button
+                if !viewModel.selectedItemIds.isEmpty {
+                    Button {
+                        viewModel.syncSelectedItems()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text(viewModel.isSyncing ? "Syncing..." : "Sync Selected (\(viewModel.selectedItemIds.count))")
+                                .fontWeight(.semibold)
+                        }
+                        .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.accentColor)
+                    .disabled(viewModel.isSyncing || !viewModel.nasOnline)
+                }
+                
+                // Sync Action Button
                 Button {
-                    viewModel.syncSelectedItems()
+                    viewModel.syncAllUncommitted()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.triangle.2.circlepath")
-                        Text(viewModel.isSyncing ? "Syncing..." : "Sync Selected (\(viewModel.selectedItemIds.count))")
+                        Text(viewModel.isSyncing ? "Syncing..." : "Sync All")
                             .fontWeight(.semibold)
                     }
                     .padding(.horizontal, 8)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.accentColor)
-                .disabled(viewModel.isSyncing || !viewModel.nasOnline)
+                .buttonStyle(.bordered)
+                .tint(viewModel.uncommittedCount > 0 ? Color.accentColor : Color.secondary)
+                .disabled(viewModel.isSyncing || viewModel.uncommittedCount == 0 || !viewModel.nasOnline)
             }
-            
-            // Sync Action Button
-            Button {
-                viewModel.syncAllUncommitted()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                    Text(viewModel.isSyncing ? "Syncing..." : "Sync All")
-                        .fontWeight(.semibold)
-                }
-                .padding(.horizontal, 8)
-            }
-            .buttonStyle(.bordered)
-            .tint(viewModel.uncommittedCount > 0 ? Color.accentColor : Color.secondary)
-            .disabled(viewModel.isSyncing || viewModel.uncommittedCount == 0 || !viewModel.nasOnline)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
