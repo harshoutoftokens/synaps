@@ -119,6 +119,9 @@ public struct MainView: View {
                 }
             }
             .searchable(text: $viewModel.searchQuery, prompt: "Search files or photos...")
+            .sheet(isPresented: $viewModel.showActivityLog) {
+                ActivityLogSheet(viewModel: viewModel)
+            }
         }
         .frame(minWidth: 900, minHeight: 600)
     }

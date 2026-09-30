@@ -54,6 +54,16 @@ public final class LocalCacheStore {
         );
         CREATE INDEX IF NOT EXISTS ix_mtime ON local_files (mtime);
         CREATE INDEX IF NOT EXISTS ix_sha256 ON local_files (sha256);
+        CREATE TABLE IF NOT EXISTS sync_activity_log (
+            id TEXT PRIMARY KEY,
+            timestamp REAL NOT NULL,
+            event_type TEXT NOT NULL,
+            file_path TEXT,
+            filename TEXT,
+            details TEXT,
+            source_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS ix_activity_timestamp ON sync_activity_log (timestamp DESC);
         """
         queue.sync {
             var errMsg: UnsafeMutablePointer<CChar>?
@@ -170,6 +180,103 @@ public final class LocalCacheStore {
                 sqlite3_bind_text(stmt, 3, (path as NSString).utf8String, -1, nil)
                 sqlite3_step(stmt)
             }
+        }
+    }
+    
+    public func logActivity(
+        eventType: SyncActivityItem.SyncActivityType,
+        filePath: String? = nil,
+        filename: String? = nil,
+        details: String,
+        sourceId: String? = nil
+    ) {
+        let item = SyncActivityItem(
+            eventType: eventType,
+            filePath: filePath,
+            filename: filename,
+            details: details,
+            sourceId: sourceId
+        )
+        queue.sync {
+            let sql = """
+            INSERT INTO sync_activity_log (id, timestamp, event_type, file_path, filename, details, source_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            
+            sqlite3_bind_text(stmt, 1, (item.id as NSString).utf8String, -1, nil)
+            sqlite3_bind_double(stmt, 2, item.timestamp.timeIntervalSince1970)
+            sqlite3_bind_text(stmt, 3, (item.eventType.rawValue as NSString).utf8String, -1, nil)
+            
+            if let p = item.filePath {
+                sqlite3_bind_text(stmt, 4, (p as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 4)
+            }
+            
+            if let f = item.filename {
+                sqlite3_bind_text(stmt, 5, (f as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 5)
+            }
+            
+            sqlite3_bind_text(stmt, 6, (item.details as NSString).utf8String, -1, nil)
+            
+            if let s = item.sourceId {
+                sqlite3_bind_text(stmt, 7, (s as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 7)
+            }
+            
+            sqlite3_step(stmt)
+        }
+    }
+    
+    public func getRecentActivity(limit: Int = 100) -> [SyncActivityItem] {
+        return queue.sync {
+            let sql = """
+            SELECT id, timestamp, event_type, file_path, filename, details, source_id
+            FROM sync_activity_log
+            ORDER BY timestamp DESC
+            LIMIT ?;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            
+            var results: [SyncActivityItem] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = String(cString: sqlite3_column_text(stmt, 0))
+                let t = sqlite3_column_double(stmt, 1)
+                let typeStr = String(cString: sqlite3_column_text(stmt, 2))
+                let type = SyncActivityItem.SyncActivityType(rawValue: typeStr) ?? .statusReconciled
+                let path = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+                let filename = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+                let details = String(cString: sqlite3_column_text(stmt, 5))
+                let source = sqlite3_column_text(stmt, 6).map { String(cString: $0) }
+                
+                results.append(SyncActivityItem(
+                    id: id,
+                    timestamp: Date(timeIntervalSince1970: t),
+                    eventType: type,
+                    filePath: path,
+                    filename: filename,
+                    details: details,
+                    sourceId: source
+                ))
+            }
+            return results
+        }
+    }
+    
+    public func clearActivityLog() {
+        queue.sync {
+            let sql = "DELETE FROM sync_activity_log;"
+            _ = sqlite3_exec(db, sql, nil, nil, nil)
         }
     }
 }

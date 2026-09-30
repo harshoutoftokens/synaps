@@ -17,6 +17,22 @@ public final class AppViewModel: ObservableObject {
     @Published public var sortField: SortField = .name
     @Published public var sortAscending: Bool = true
     @Published public var selectedItemIds: Set<String> = []
+    @Published public var lastSelectedId: String? = nil
+    @Published public var recentActivities: [SyncActivityItem] = []
+    @Published public var showActivityLog: Bool = false
+    
+    public var selectedItems: [SynapsFileItem] {
+        return fileItems.filter { selectedItemIds.contains($0.id) }
+    }
+    
+    public var selectedUrls: [URL] {
+        return selectedItems.compactMap { item -> URL? in
+            if item.originalPath.hasPrefix("iPhone://") {
+                return nil
+            }
+            return URL(fileURLWithPath: item.originalPath)
+        }
+    }
     
     public var isPicturesSection: Bool {
         selectedSidebarItem?.id == "section_pictures" || selectedSidebarItem?.isPhone == true
@@ -50,6 +66,7 @@ public final class AppViewModel: ObservableObject {
     public init() {
         setupPhoneObserver()
         setupScannerObserver()
+        loadRecentActivities()
         Task {
             await checkNASStatus()
             loadDefaultFolder()
@@ -262,11 +279,33 @@ public final class AppViewModel: ObservableObject {
         }
     }
     
+    public func handleItemClick(_ item: SynapsFileItem, commandKey: Bool = false, shiftKey: Bool = false) {
+        if commandKey {
+            if selectedItemIds.contains(item.id) {
+                selectedItemIds.remove(item.id)
+            } else {
+                selectedItemIds.insert(item.id)
+                lastSelectedId = item.id
+            }
+        } else if shiftKey, let lastId = lastSelectedId,
+                  let lastIdx = filteredItems.firstIndex(where: { $0.id == lastId }),
+                  let currentIdx = filteredItems.firstIndex(where: { $0.id == item.id }) {
+            let range = min(lastIdx, currentIdx)...max(lastIdx, currentIdx)
+            for i in range {
+                selectedItemIds.insert(filteredItems[i].id)
+            }
+        } else {
+            selectedItemIds = [item.id]
+            lastSelectedId = item.id
+        }
+    }
+    
     public func toggleSelection(id: String) {
         if selectedItemIds.contains(id) {
             selectedItemIds.remove(id)
         } else {
             selectedItemIds.insert(id)
+            lastSelectedId = id
         }
     }
     
@@ -276,6 +315,7 @@ public final class AppViewModel: ObservableObject {
     
     public func deselectAll() {
         selectedItemIds.removeAll()
+        lastSelectedId = nil
     }
     
     public func toggleQuickLook() {
@@ -347,6 +387,18 @@ public final class AppViewModel: ObservableObject {
             if !dedupPaths.isEmpty {
                 cacheStore.markSynced(paths: Array(dedupPaths), status: .committed)
                 
+                for p in dedupPaths {
+                    let fn = (p as NSString).lastPathComponent
+                    cacheStore.logActivity(
+                        eventType: .existingDiscovered,
+                        filePath: p,
+                        filename: fn,
+                        details: "Existing file detected on NAS (SHA-256 match)",
+                        sourceId: sourceId
+                    )
+                }
+                loadRecentActivities()
+                
                 // Update local fileItems state
                 for i in 0..<fileItems.count {
                     if dedupPaths.contains(fileItems[i].originalPath) {
@@ -376,6 +428,13 @@ public final class AppViewModel: ObservableObject {
         syncProgress = 0.0
         syncStatusMessage = "Starting sync of \(toSync.count) files..."
         
+        cacheStore.logActivity(
+            eventType: .syncStarted,
+            details: "Started sync of \(toSync.count) files",
+            sourceId: toSync.first?.sourceId
+        )
+        loadRecentActivities()
+        
         Task {
             let total = toSync.count
             var uploadedCount = 0
@@ -401,15 +460,36 @@ public final class AppViewModel: ObservableObject {
                         self.syncSpeedMBs = speed
                         
                         cacheStore.markSynced(paths: [item.originalPath], status: .committed)
+                        cacheStore.logActivity(
+                            eventType: .fileSynced,
+                            filePath: item.originalPath,
+                            filename: item.filename,
+                            details: "Uploaded \(item.formattedSize) to NAS Vault",
+                            sourceId: item.sourceId
+                        )
                         if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
                             fileItems[idx].syncStatus = .committed
                         }
                     } else {
+                        cacheStore.logActivity(
+                            eventType: .syncFailed,
+                            filePath: item.originalPath,
+                            filename: item.filename,
+                            details: "Upload rejected by server",
+                            sourceId: item.sourceId
+                        )
                         if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
                             fileItems[idx].syncStatus = .failed
                         }
                     }
                 } catch {
+                    cacheStore.logActivity(
+                        eventType: .syncFailed,
+                        filePath: item.originalPath,
+                        filename: item.filename,
+                        details: "Upload error: \(error.localizedDescription)",
+                        sourceId: item.sourceId
+                    )
                     if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
                         fileItems[idx].syncStatus = .failed
                     }
@@ -424,9 +504,25 @@ public final class AppViewModel: ObservableObject {
             self.syncSpeedMBs = 0.0
             self.syncStatusMessage = "Committed \(uploadedCount) files in \(String(format: "%.1f", elapsed))s"
             
+            cacheStore.logActivity(
+                eventType: .syncCompleted,
+                details: "Committed \(uploadedCount) files in \(String(format: "%.1f", elapsed))s",
+                sourceId: toSync.first?.sourceId
+            )
+            loadRecentActivities()
+            
             // Native macOS notification
             notify(title: "Synaps NAS Sync", message: "Successfully synced \(uploadedCount) files to NAS Vault.")
         }
+    }
+    
+    public func loadRecentActivities() {
+        self.recentActivities = cacheStore.getRecentActivity(limit: 100)
+    }
+    
+    public func clearRecentActivities() {
+        cacheStore.clearActivityLog()
+        self.recentActivities = []
     }
     
     private func notify(title: String, message: String) {
