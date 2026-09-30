@@ -109,7 +109,7 @@ public struct SidebarView: View {
                         Text(viewModel.nasOnline ? "homecloud1" : "NAS Offline")
                             .font(.subheadline)
                             .fontWeight(.medium)
-                        Text(NASClient.shared.getBaseUrl())
+                        Text(viewModel.nasBaseUrl)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
