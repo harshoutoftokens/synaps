@@ -1,0 +1,4 @@
+.build/
+SynapsMac.app/
+*.xcodeproj/
+.DS_Store
