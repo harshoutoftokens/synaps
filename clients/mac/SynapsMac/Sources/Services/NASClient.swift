@@ -61,36 +61,72 @@ public final class NASClient {
     }
     
     public func checkHealth() async -> Bool {
-        let candidates = [
+        let rawCandidates = [
             activeBaseUrl,
+            SynapsConfig.load().nasUrl,
             "http://192.168.0.101:8000",
             "http://homecloud1.local:8000",
             "http://192.168.0.105:8000",
             "http://localhost:8000"
         ]
         
-        for candidate in candidates {
-            guard let url = URL(string: "\(candidate)/health") else { continue }
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 1.5
-            do {
-                let (data, response) = try await URLSession.shared.data(for: req)
-                if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       json["status"] as? String == "ok" {
-                        if candidate != activeBaseUrl {
-                            self.activeBaseUrl = candidate
-                            var cfg = SynapsConfig.load()
-                            cfg.nasUrl = candidate
-                            cfg.save()
-                        }
-                        return true
-                    }
-                }
-            } catch {
-                continue
+        var seen = Set<String>()
+        var uniqueCandidates: [String] = []
+        for candidate in rawCandidates {
+            let trimmed = candidate.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if !trimmed.isEmpty && !seen.contains(trimmed) {
+                seen.insert(trimmed)
+                uniqueCandidates.append(trimmed)
             }
         }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 2.0
+        config.timeoutIntervalForResource = 2.0
+        config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let session = URLSession(configuration: config)
+        
+        let foundUrl: String? = await withTaskGroup(of: String?.self) { group in
+            for candidate in uniqueCandidates {
+                group.addTask {
+                    guard let url = URL(string: "\(candidate)/health") else { return nil }
+                    var req = URLRequest(url: url)
+                    req.timeoutInterval = 2.0
+                    req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+                    do {
+                        let (data, response) = try await session.data(for: req)
+                        if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                               json["status"] as? String == "ok" {
+                                return candidate
+                            }
+                        }
+                    } catch {
+                        // Candidate offline or connection failed
+                    }
+                    return nil
+                }
+            }
+            
+            for await result in group {
+                if let candidate = result {
+                    group.cancelAll()
+                    return candidate
+                }
+            }
+            return nil
+        }
+        
+        if let found = foundUrl {
+            if found != self.activeBaseUrl {
+                self.activeBaseUrl = found
+                var cfg = SynapsConfig.load()
+                cfg.nasUrl = found
+                cfg.save()
+            }
+            return true
+        }
+        
         return false
     }
     

@@ -12,6 +12,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var syncSpeedMBs: Double = 0.0
     @Published public var syncStatusMessage: String = "Ready"
     @Published public var nasOnline: Bool = false
+    @Published public var nasBaseUrl: String = NASClient.shared.getBaseUrl()
     @Published public var searchQuery: String = ""
     @Published public var filterSelection: FilterOption = .all
     @Published public var sortField: SortField = .name
@@ -49,13 +50,38 @@ public final class AppViewModel: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     
+    private var nasRecoveryTimer: Timer?
+    
     public init() {
         setupPhoneObserver()
         setupScannerObserver()
         setupSelectionNotifications()
+        setupLifecycleObservers()
+        startNASRecoveryTimer()
         Task {
             await checkNASStatus()
             loadDefaultFolder()
+        }
+    }
+    
+    private func setupLifecycleObservers() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.checkNASStatus()
+            }
+        }
+    }
+    
+    private func startNASRecoveryTimer() {
+        nasRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 45.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, !self.nasOnline else { return }
+                await self.checkNASStatus()
+            }
         }
     }
     
@@ -216,8 +242,14 @@ public final class AppViewModel: ObservableObject {
     
     public func checkNASStatus() async {
         let online = await nasClient.checkHealth()
+        let currentUrl = nasClient.getBaseUrl()
         let wasOffline = !self.nasOnline
-        self.nasOnline = online
+        
+        await MainActor.run {
+            self.nasOnline = online
+            self.nasBaseUrl = currentUrl
+        }
+        
         if online && wasOffline && !self.fileItems.isEmpty {
             await runPreCheckDeduplication(items: self.fileItems, sourceId: selectedSidebarItem?.sourceId ?? "mac_harsh")
         }
