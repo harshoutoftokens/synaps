@@ -153,6 +153,14 @@ public struct FileListView: View {
                         }
                     }
                     .contextMenu {
+                        if !item.isDirectory {
+                            Button("Quick Look") {
+                                if !viewModel.selectedItemIds.contains(item.id) {
+                                    viewModel.handleItemClick(item)
+                                }
+                                viewModel.toggleQuickLook()
+                            }
+                        }
                         Button("Reveal in Finder") {
                             NSWorkspace.shared.selectFile(item.originalPath, inFileViewerRootedAtPath: "")
                         }

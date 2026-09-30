@@ -90,6 +90,15 @@ public struct MainView: View {
                     }
                     .help("Sort items by \(viewModel.sortField.rawValue) (\(viewModel.sortAscending ? "Ascending" : "Descending"))")
                     
+                    // Quick Look Button
+                    Button {
+                        viewModel.toggleQuickLook()
+                    } label: {
+                        Image(systemName: "eye")
+                    }
+                    .disabled(viewModel.selectedItemIds.isEmpty)
+                    .help("Quick Look selected item(s) (Space)")
+                    
                     // Display Mode Toggle (List vs Grid)
                     Picker("View", selection: $displayMode) {
                         Image(systemName: "list.bullet").tag(ContentDisplayMode.list)

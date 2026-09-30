@@ -89,6 +89,17 @@ public final class AppViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+            
+        $selectedItemIds
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] ids in
+                guard let self = self else { return }
+                let urls = self.filteredItems
+                    .filter { ids.contains($0.id) && !$0.originalPath.hasPrefix("iPhone://") }
+                    .compactMap { URL(fileURLWithPath: $0.originalPath) }
+                QuickLookCoordinator.shared.updatePreviewItems(urls)
+            }
+            .store(in: &cancellables)
     }
     
     public var uncommittedItems: [SynapsFileItem] {
@@ -277,6 +288,10 @@ public final class AppViewModel: ObservableObject {
     public func deselectAll() {
         selectedItemIds.removeAll()
         lastSelectedId = nil
+    }
+    
+    public func toggleQuickLook() {
+        QuickLookCoordinator.shared.toggleQuickLook(for: selectedUrls)
     }
     
     public func importSelectedItems() {
