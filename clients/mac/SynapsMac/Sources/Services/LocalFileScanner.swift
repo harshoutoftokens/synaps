@@ -23,7 +23,8 @@ public final class LocalFileScanner {
             DispatchQueue.global(qos: .userInitiated).async {
                 var results: [SynapsFileItem] = []
                 let fileManager = FileManager.default
-                let url = URL(fileURLWithPath: directoryPath)
+                let url = SecurityBookmarkManager.shared.startAccessing(path: directoryPath)
+                defer { SecurityBookmarkManager.shared.stopAccessing(path: directoryPath) }
                 
                 // Shallow listing (immediate directory contents only, matching native Finder behavior)
                 guard let urls = try? fileManager.contentsOfDirectory(
