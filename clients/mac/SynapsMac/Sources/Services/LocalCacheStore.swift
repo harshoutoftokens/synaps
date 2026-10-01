@@ -261,7 +261,11 @@ public final class LocalCacheStore {
                 sqlite3_bind_int64(stmt, 3, size)
                 sqlite3_bind_double(stmt, 4, mtime)
                 sqlite3_bind_null(stmt, 5)
-                sqlite3_bind_double(stmt, 6, now)
+                if status == .uncommitted {
+                    sqlite3_bind_null(stmt, 6)
+                } else {
+                    sqlite3_bind_double(stmt, 6, now)
+                }
                 sqlite3_bind_text(stmt, 7, (status.rawValue as NSString).utf8String, -1, nil)
                 if sqlite3_step(stmt) != SQLITE_DONE {
                     if let err = sqlite3_errmsg(db) {
@@ -269,6 +273,32 @@ public final class LocalCacheStore {
                     }
                 }
             }
+        }
+    }
+    
+    public func updateSyncStatus(path: String, status: SyncStatus) {
+        let norm = Self.normalizePath(path)
+        let now = Date().timeIntervalSince1970
+        queue.sync {
+            let sql = """
+            UPDATE local_files
+            SET sync_status = ?,
+                last_synced_at = ?
+            WHERE path = ? OR path = ?;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            
+            sqlite3_bind_text(stmt, 1, (status.rawValue as NSString).utf8String, -1, nil)
+            if status == .committed {
+                sqlite3_bind_double(stmt, 2, now)
+            } else {
+                sqlite3_bind_null(stmt, 2)
+            }
+            sqlite3_bind_text(stmt, 3, (norm as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 4, (path as NSString).utf8String, -1, nil)
+            _ = sqlite3_step(stmt)
         }
     }
     

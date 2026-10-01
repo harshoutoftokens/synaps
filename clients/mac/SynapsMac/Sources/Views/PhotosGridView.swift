@@ -226,12 +226,27 @@ public struct PhotosGridView: View {
             } else if viewModel.filteredItems.isEmpty {
                 Spacer()
                 VStack(spacing: 12) {
-                    Image(systemName: "folder")
+                    Image(systemName: viewModel.syncStatusMessage.contains("Failed") ? "exclamationmark.triangle" : "folder")
                         .font(.system(size: 40))
-                        .foregroundColor(.secondary)
-                    Text("No Items Found")
+                        .foregroundColor(viewModel.syncStatusMessage.contains("Failed") ? .orange : .secondary)
+                    Text(viewModel.syncStatusMessage.contains("Failed") ? "Could Not Load Items" : "No Items Found")
                         .font(.headline)
                         .foregroundColor(.secondary)
+                    if viewModel.syncStatusMessage.contains("Failed") {
+                        Text(viewModel.syncStatusMessage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 320)
+                        Button("Try Again") {
+                            if viewModel.isNASSection {
+                                viewModel.loadNASFolder(path: viewModel.currentNASRelativePath)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                    }
                 }
                 Spacer()
             } else {
@@ -435,8 +450,18 @@ public struct PhotoThumbnailCell: View {
         }
         .onHover { isHovered = $0 }
         .onAppear {
+            if item.originalPath.hasPrefix("nas://") {
+                if let cached = NASThumbnailLoader.shared.getCachedThumbnail(for: item.originalPath) {
+                    self.nsImage = cached
+                }
+            }
             loadThumbnail()
             loadInfo()
+        }
+        .onDisappear {
+            if item.originalPath.hasPrefix("nas://") {
+                NASThumbnailLoader.shared.cancelLoad(for: item.originalPath)
+            }
         }
         .onReceive(iPhoneManager.shared.$thumbnailsVersion) { _ in
             if item.originalPath.hasPrefix("iPhone://") && nsImage == nil {
@@ -632,6 +657,15 @@ public struct PhotoThumbnailCell: View {
             self.nsImage = NSWorkspace.shared.icon(for: .folder)
             return
         }
+        guard item.isImageOrVideo else {
+            let ext = (item.filename as NSString).pathExtension.lowercased()
+            if !ext.isEmpty, let ut = UTType(filenameExtension: ext) {
+                self.nsImage = NSWorkspace.shared.icon(for: ut)
+            } else {
+                self.nsImage = NSWorkspace.shared.icon(for: .data)
+            }
+            return
+        }
         if item.originalPath.hasPrefix("iPhone://") {
             iPhoneManager.shared.loadThumbnail(for: item.filename) { image in
                 if let image = image {
@@ -639,7 +673,18 @@ public struct PhotoThumbnailCell: View {
                 }
             }
         } else if item.originalPath.hasPrefix("nas://") {
-            return
+            let relativePath = item.originalPath.replacingOccurrences(of: "nas://", with: "")
+            if let cached = NASThumbnailLoader.shared.getCachedThumbnail(for: relativePath) {
+                self.nsImage = cached
+                return
+            }
+            NASThumbnailLoader.shared.loadThumbnail(for: relativePath, baseUrl: NASClient.shared.getBaseUrl(), targetSize: max(160, size * 2)) { image in
+                if let image = image {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.nsImage = image
+                    }
+                }
+            }
         } else {
             ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: max(160, size * 2)) { image in
                 self.nsImage = image

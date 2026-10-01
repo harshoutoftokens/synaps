@@ -27,14 +27,60 @@ public struct IngestCheckItemResult: Codable {
     public let status: String // "dedup_linked" or "need_upload"
     public let sha256: String?
     public let error: String?
+    public let physical_object_id: String?
+    
+    public init(
+        original_path: String,
+        status: String,
+        sha256: String? = nil,
+        error: String? = nil,
+        physical_object_id: String? = nil
+    ) {
+        self.original_path = original_path
+        self.status = status
+        self.sha256 = sha256
+        self.error = error
+        self.physical_object_id = physical_object_id
+    }
 }
 
 public struct IngestCheckBatchResponse: Codable {
-    public let status: String
-    public let total_checked: Int
-    public let dedup_count: Int
-    public let need_upload_count: Int
+    public let source_id: String?
+    public let status: String?
+    public let total_checked: Int?
+    public let dedup_linked: Int?
+    public let dedup_count: Int?
+    public let need_upload: Int?
+    public let need_upload_count: Int?
     public let results: [IngestCheckItemResult]
+    
+    public init(
+        source_id: String? = nil,
+        status: String? = nil,
+        total_checked: Int? = nil,
+        dedup_linked: Int? = nil,
+        dedup_count: Int? = nil,
+        need_upload: Int? = nil,
+        need_upload_count: Int? = nil,
+        results: [IngestCheckItemResult] = []
+    ) {
+        self.source_id = source_id
+        self.status = status
+        self.total_checked = total_checked
+        self.dedup_linked = dedup_linked
+        self.dedup_count = dedup_count
+        self.need_upload = need_upload
+        self.need_upload_count = need_upload_count
+        self.results = results
+    }
+    
+    public var dedupCount: Int {
+        return dedup_linked ?? dedup_count ?? results.filter { $0.status == "dedup_linked" }.count
+    }
+    
+    public var needUploadCount: Int {
+        return need_upload ?? need_upload_count ?? results.filter { $0.status == "need_upload" }.count
+    }
 }
 
 public struct AlbumSyncPayload: Codable {
@@ -49,6 +95,14 @@ public struct NASFolderItem: Codable {
     public let type: String
     public let children_count: Int?
     public let modified: String?
+    
+    public init(name: String, path: String, type: String = "folder", children_count: Int? = nil, modified: String? = nil) {
+        self.name = name
+        self.path = path
+        self.type = type
+        self.children_count = children_count
+        self.modified = modified
+    }
 }
 
 public struct NASFileItem: Codable {
@@ -61,6 +115,28 @@ public struct NASFileItem: Codable {
     public let size: Int64
     public let size_human: String?
     public let modified: String?
+    
+    public init(
+        name: String,
+        path: String,
+        type: String = "file",
+        file_type: String? = nil,
+        extension: String? = nil,
+        mime_type: String? = nil,
+        size: Int64 = 0,
+        size_human: String? = nil,
+        modified: String? = nil
+    ) {
+        self.name = name
+        self.path = path
+        self.type = type
+        self.file_type = file_type
+        self.extension = `extension`
+        self.mime_type = mime_type
+        self.size = size
+        self.size_human = size_human
+        self.modified = modified
+    }
 }
 
 public struct NASBrowseResponse: Codable {
@@ -71,6 +147,24 @@ public struct NASBrowseResponse: Codable {
     public let total_files: Int
     public let page: Int
     public let per_page: Int
+    
+    public init(
+        current_path: String = "",
+        folders: [NASFolderItem] = [],
+        files: [NASFileItem] = [],
+        total_folders: Int = 0,
+        total_files: Int = 0,
+        page: Int = 1,
+        per_page: Int = 0
+    ) {
+        self.current_path = current_path
+        self.folders = folders
+        self.files = files
+        self.total_folders = total_folders
+        self.total_files = total_files
+        self.page = page
+        self.per_page = per_page
+    }
 }
 
 public final class NASClient {
@@ -309,9 +403,12 @@ public final class NASClient {
         _ = try await URLSession.shared.data(for: req)
     }
     
-    public func browseDirectory(path: String = "") async throws -> NASBrowseResponse {
+    public func browseDirectory(path: String = "", page: Int = 1, perPage: Int = 1000) async throws -> NASBrowseResponse {
         var components = URLComponents(string: "\(activeBaseUrl)/api/finder/browse")
-        var queryItems = [URLQueryItem(name: "per_page", value: "500")]
+        var queryItems = [
+            URLQueryItem(name: "page", value: "\(max(1, page))"),
+            URLQueryItem(name: "per_page", value: "\(min(max(1, perPage), 1000))")
+        ]
         if !path.isEmpty {
             queryItems.append(URLQueryItem(name: "path", value: path))
         }
@@ -322,16 +419,55 @@ public final class NASClient {
         }
         
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 5.0
+        config.timeoutIntervalForRequest = 25.0
+        config.timeoutIntervalForResource = 35.0
         config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         let session = URLSession(configuration: config)
         
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse else {
+                throw URLError(.badServerResponse)
+            }
+            if http.statusCode == 404 {
+                return NASBrowseResponse(current_path: path, folders: [], files: [], total_folders: 0, total_files: 0, page: page, per_page: perPage)
+            }
+            guard http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
+        } catch {
+            // One-time retry after brief delay in case backend was restarting or momentarily busy
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
+        }
+    }
+    
+    public func browseAllDirectoryFiles(path: String) async throws -> [NASFileItem] {
+        var page = 1
+        var allFiles: [NASFileItem] = []
+        var totalExpected: Int? = nil
+        
+        while page <= 50 { // Safety limit: up to 50,000 files
+            let resp = try await browseDirectory(path: path, page: page, perPage: 1000)
+            if resp.files.isEmpty {
+                break
+            }
+            allFiles.append(contentsOf: resp.files)
+            if totalExpected == nil {
+                totalExpected = resp.total_files
+            }
+            if allFiles.count >= (totalExpected ?? 0) || resp.files.count < 1000 {
+                break
+            }
+            page += 1
         }
         
-        return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
+        return allFiles
     }
     
     public func downloadFile(relativePath: String, destinationURL: URL) async throws -> Bool {
