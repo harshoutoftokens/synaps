@@ -268,43 +268,36 @@ public struct PhotosGridView: View {
                                 viewModel.clearSelection()
                             }
                         
-                        LazyVGrid(columns: columns, spacing: 14) {
-                            ForEach(viewModel.filteredItems) { item in
-                                PhotoThumbnailCell(
-                                    item: item,
-                                    size: gridSize,
-                                    isPicturesSection: false,
-                                    isSelected: viewModel.selectedItemIds.contains(item.id),
-                                    onToggleSelect: {
-                                        let flags = NSEvent.modifierFlags
-                                        viewModel.handleItemClick(
-                                            item,
-                                            commandKey: flags.contains(.command),
-                                            shiftKey: flags.contains(.shift),
-                                            onDoubleClick: {
-                                                if item.isDirectory {
-                                                    viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
-                                                } else {
-                                                    let url = URL(fileURLWithPath: item.originalPath)
-                                                    if FileManager.default.fileExists(atPath: item.originalPath) {
-                                                        NSWorkspace.shared.open(url)
-                                                    }
+                        if viewModel.sortField == .kind {
+                            VStack(alignment: .leading, spacing: 20) {
+                                ForEach(viewModel.groupedItemsByKind) { group in
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        kindSectionHeader(for: group)
+                                            .padding(.horizontal, 16)
+                                            .padding(.top, 4)
+                                        
+                                        if !viewModel.isKindCollapsed(group.kind.rawValue) {
+                                            LazyVGrid(columns: columns, spacing: 14) {
+                                                ForEach(group.items) { item in
+                                                    photoThumbnailCell(for: item)
                                                 }
                                             }
-                                        )
-                                    },
-                                    onSync: {
-                                        if !viewModel.selectedItemIds.isEmpty && (viewModel.selectedItemIds.contains(item.id) || viewModel.selectedItemIds.count > 1) {
-                                            viewModel.syncSelectedItems()
-                                        } else {
-                                            viewModel.syncItem(item)
+                                            .padding(.horizontal, 16)
                                         }
-                                    },
-                                    selectedCount: viewModel.selectedItemIds.count
-                                )
+                                    }
+                                }
                             }
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        } else {
+                            LazyVGrid(columns: columns, spacing: 14) {
+                                ForEach(viewModel.filteredItems) { item in
+                                    photoThumbnailCell(for: item)
+                                }
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
-                        .padding(14)
                     }
                     .frame(maxWidth: .infinity, minHeight: 600, alignment: .topLeading)
                 }
@@ -317,6 +310,83 @@ public struct PhotosGridView: View {
                 )
             }
         }
+    }
+    
+    @ViewBuilder
+    private func kindSectionHeader(for group: AppViewModel.FileGroup) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                viewModel.toggleKindCollapsed(group.kind.rawValue)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .rotationEffect(.degrees(viewModel.isKindCollapsed(group.kind.rawValue) ? 0 : 90))
+                    .frame(width: 14)
+                
+                Text(group.kind.rawValue)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Text("\(group.items.count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule()
+                            .fill(Color(nsColor: .quaternaryLabelColor))
+                    )
+                
+                Spacer()
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func photoThumbnailCell(for item: SynapsFileItem) -> some View {
+        PhotoThumbnailCell(
+            item: item,
+            size: gridSize,
+            isPicturesSection: false,
+            isNASSection: viewModel.isNASSection,
+            isSelected: viewModel.selectedItemIds.contains(item.id),
+            onToggleSelect: {
+                let flags = NSEvent.modifierFlags
+                viewModel.handleItemClick(
+                    item,
+                    commandKey: flags.contains(.command),
+                    shiftKey: flags.contains(.shift),
+                    onDoubleClick: {
+                        if item.isDirectory {
+                            viewModel.navigateIntoFolder(path: item.originalPath, title: item.filename, sourceId: item.sourceId)
+                        } else if viewModel.isNASSection {
+                            viewModel.downloadNASItem(item)
+                        } else {
+                            let url = URL(fileURLWithPath: item.originalPath)
+                            if FileManager.default.fileExists(atPath: item.originalPath) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                )
+            },
+            onSync: {
+                if !viewModel.selectedItemIds.isEmpty && (viewModel.selectedItemIds.contains(item.id) || viewModel.selectedItemIds.count > 1) {
+                    viewModel.syncSelectedItems()
+                } else {
+                    viewModel.syncItem(item)
+                }
+            },
+            onDownload: {
+                viewModel.downloadNASItem(item)
+            },
+            selectedCount: viewModel.selectedItemIds.count
+        )
     }
     
     private var zoomSlider: some View {
@@ -339,10 +409,12 @@ public struct PhotoThumbnailCell: View {
     public let item: SynapsFileItem
     public let size: CGFloat
     public var isPicturesSection: Bool = false
+    public var isNASSection: Bool = false
     public var isSelected: Bool = false
     public var onToggleSelect: (() -> Void)? = nil
     public var onDoubleClick: (() -> Void)? = nil
     public var onSync: (() -> Void)? = nil
+    public var onDownload: (() -> Void)? = nil
     public var selectedCount: Int = 0
     
     @State private var nsImage: NSImage?
@@ -448,8 +520,10 @@ public struct PhotoThumbnailCell: View {
                 }
                 
                 // Git-for-Files Badge (Bottom Right)
-                FileBadgeView(status: item.syncStatus, size: max(16, size * 0.16))
-                    .padding(6)
+                if !isPicturesSection && !isNASSection {
+                    FileBadgeView(status: item.syncStatus, size: max(16, size * 0.16))
+                        .padding(6)
+                }
             }
             
             // Item / Folder Name Label
@@ -500,9 +574,17 @@ public struct PhotoThumbnailCell: View {
                     NSPasteboard.general.setString(sha, forType: .string)
                 }
             }
-            if item.syncStatus != .committed && FileManager.default.fileExists(atPath: item.originalPath) {
-                Button(selectedCount > 1 ? "Sync Selected (\(selectedCount)) to NAS" : "Sync to NAS") {
-                    onSync?()
+            if isNASSection {
+                if !item.isDirectory {
+                    Button("Download to Mac") {
+                        onDownload?()
+                    }
+                }
+            } else {
+                if item.syncStatus != .committed && FileManager.default.fileExists(atPath: item.originalPath) {
+                    Button(selectedCount > 1 ? "Sync Selected (\(selectedCount)) to NAS" : "Sync to NAS") {
+                        onSync?()
+                    }
                 }
             }
         }

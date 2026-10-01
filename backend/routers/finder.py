@@ -3,6 +3,7 @@ Synaps Finder Router — Directory browsing APIs
 Optimized for low-power NAS with paginated responses.
 """
 from fastapi import APIRouter, Query, HTTPException
+from fastapi.responses import FileResponse
 from typing import Optional
 import os
 import mimetypes
@@ -125,6 +126,28 @@ def browse_directory(
         "page": page,
         "per_page": per_page,
     }
+
+
+@router.get("/download")
+def download_file(path: str = Query(..., description="Relative path from storage root")):
+    """Download a file from the NAS storage."""
+    clean_path = os.path.normpath(path).lstrip("/")
+    if ".." in clean_path:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    full_path = os.path.join(STORAGE_PATH, clean_path)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=400, detail="Not a file")
+
+    filename = os.path.basename(full_path)
+    mime_type, _ = mimetypes.guess_type(full_path)
+    return FileResponse(
+        full_path,
+        media_type=mime_type or "application/octet-stream",
+        filename=filename,
+    )
 
 
 @router.get("/tree")
