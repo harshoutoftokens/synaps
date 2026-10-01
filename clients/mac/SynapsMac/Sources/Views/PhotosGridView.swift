@@ -1,12 +1,15 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 public struct PhotosGridView: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var gridSize: CGFloat = 130
+    @AppStorage("photosGridSize") private var gridSize: Double = 80
     
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: gridSize, maximum: gridSize + 40), spacing: 12, alignment: .top)]
+        let minWidth = max(124, CGFloat(gridSize) + 44)
+        let maxWidth = max(164, CGFloat(gridSize) + 72)
+        return [GridItem(.adaptive(minimum: minWidth, maximum: maxWidth), spacing: 24, alignment: .top)]
     }
     
     public var body: some View {
@@ -28,10 +31,6 @@ public struct PhotosGridView: View {
             deviceLockedView
         } else {
             VStack(spacing: 0) {
-                importControlsBar
-                
-                Divider()
-                
                 if viewModel.isLoading {
                     Spacer()
                     VStack(spacing: 12) {
@@ -53,11 +52,11 @@ public struct PhotosGridView: View {
                     Spacer()
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: columns, spacing: 14) {
+                        LazyVGrid(columns: columns, spacing: 32) {
                             ForEach(viewModel.filteredItems) { item in
                                 PhotoThumbnailCell(
                                     item: item,
-                                    size: gridSize,
+                                    size: CGFloat(gridSize),
                                     isPicturesSection: true,
                                     isSelected: viewModel.selectedItemIds.contains(item.id),
                                     onToggleSelect: {
@@ -73,7 +72,9 @@ public struct PhotosGridView: View {
                                 )
                             }
                         }
-                        .padding(14)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                        .padding(.bottom, 28)
                     }
                 }
             }
@@ -214,35 +215,6 @@ public struct PhotosGridView: View {
     // MARK: - Standard Folder Content
     private var standardFolderContent: some View {
         VStack(spacing: 0) {
-            // Controls bar (Navigation, Zoom slider & stats)
-            HStack(spacing: 12) {
-                if !viewModel.navigationHistory.isEmpty {
-                    Button {
-                        viewModel.navigateBack()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                            Text("Back")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                
-                Text("\(viewModel.filteredItems.count) items")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                zoomSlider
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
-            
-            Divider()
-            
             if viewModel.isLoading {
                 Spacer()
                 VStack(spacing: 12) {
@@ -273,33 +245,35 @@ public struct PhotosGridView: View {
                             }
                         
                         if viewModel.sortField == .kind {
-                            VStack(alignment: .leading, spacing: 20) {
+                            VStack(alignment: .leading, spacing: 24) {
                                 ForEach(viewModel.groupedItemsByKind) { group in
-                                    VStack(alignment: .leading, spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 14) {
                                         kindSectionHeader(for: group)
-                                            .padding(.horizontal, 16)
-                                            .padding(.top, 4)
+                                            .padding(.horizontal, 24)
                                         
                                         if !viewModel.isKindCollapsed(group.kind.rawValue) {
-                                            LazyVGrid(columns: columns, spacing: 14) {
+                                            LazyVGrid(columns: columns, spacing: 32) {
                                                 ForEach(group.items) { item in
                                                     photoThumbnailCell(for: item)
                                                 }
                                             }
-                                            .padding(.horizontal, 16)
+                                            .padding(.horizontal, 24)
                                         }
                                     }
                                 }
                             }
-                            .padding(.vertical, 12)
+                            .padding(.top, 20)
+                            .padding(.bottom, 28)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                         } else {
-                            LazyVGrid(columns: columns, spacing: 14) {
+                            LazyVGrid(columns: columns, spacing: 32) {
                                 ForEach(viewModel.filteredItems) { item in
                                     photoThumbnailCell(for: item)
                                 }
                             }
-                            .padding(14)
+                            .padding(.horizontal, 24)
+                            .padding(.top, 24)
+                            .padding(.bottom, 28)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
                     }
@@ -355,7 +329,7 @@ public struct PhotosGridView: View {
     private func photoThumbnailCell(for item: SynapsFileItem) -> some View {
         PhotoThumbnailCell(
             item: item,
-            size: gridSize,
+            size: CGFloat(gridSize),
             isPicturesSection: false,
             isNASSection: viewModel.isNASSection,
             isSelected: viewModel.selectedItemIds.contains(item.id),
@@ -423,148 +397,56 @@ public struct PhotoThumbnailCell: View {
     
     @State private var nsImage: NSImage?
     @State private var isHovered = false
+    @State private var itemInfo: String = ""
     
     private var isDirectoryOrDoc: Bool {
         item.isDirectory || !item.isImageOrVideo
     }
     
+    private var labelFontSize: CGFloat {
+        max(10, min(12, size * 0.095))
+    }
+    
+    private var subtitleFontSize: CGFloat {
+        max(9, min(11, size * 0.085))
+    }
+    
     public var body: some View {
-        VStack(spacing: 6) {
-            ZStack(alignment: .bottomTrailing) {
-                // Background & Thumbnail / Icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                    
-                    if let img = nsImage {
-                        if isDirectoryOrDoc {
-                            Image(nsImage: img)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .padding(size * 0.14)
-                                .frame(width: size, height: size)
-                        } else {
-                            Image(nsImage: img)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: size, height: size)
-                                .clipped()
-                                .cornerRadius(10)
-                        }
-                    } else {
-                        VStack(spacing: 6) {
-                            Image(systemName: item.isDirectory ? "folder.fill" : (item.isLivePhotoVideo ? "video.fill" : (item.isImageOrVideo ? "photo" : "doc.fill")))
-                                .font(.system(size: size * 0.3))
-                                .foregroundColor(item.isDirectory ? .accentColor : .secondary.opacity(0.7))
-                        }
-                        .frame(width: size, height: size)
-                    }
-                }
-                .frame(width: size, height: size)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(
-                            isSelected ? Color.accentColor : (isHovered ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.08)),
-                            lineWidth: isSelected ? 3 : (isHovered ? 2 : 1)
-                        )
-                )
-                
-                // Selection Checkbox for Pictures Section (Top Left)
-                if isPicturesSection {
-                    VStack {
-                        HStack {
-                            Button {
-                                onToggleSelect?()
-                            } label: {
-                                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                                    .foregroundColor(isSelected ? .accentColor : (isHovered ? .white : .clear))
-                                    .font(.system(size: max(16, size * 0.16)))
-                                    .background(
-                                        Circle()
-                                            .fill(isSelected ? Color.clear : (isHovered ? Color.black.opacity(0.4) : Color.clear))
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                            .padding(6)
-                            Spacer()
-                        }
-                        Spacer()
-                    }
-                    .frame(width: size, height: size)
-                } else if item.isFavorite {
-                    // Favorite Badge (Top Left)
-                    VStack {
-                        HStack {
-                            Image(systemName: "heart.fill")
-                                .foregroundColor(.pink)
-                                .font(.system(size: 11))
-                                .padding(4)
-                                .background(Circle().fill(Color.black.opacity(0.6)))
-                                .padding(6)
-                            Spacer()
-                        }
-                        Spacer()
-                    }
-                    .frame(width: size, height: size)
-                }
-                
-                // Video indicator (Top Right)
-                if item.isLivePhotoVideo || item.filename.lowercased().hasSuffix(".mov") || item.filename.lowercased().hasSuffix(".mp4") {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Image(systemName: "play.circle.fill")
-                                .foregroundColor(.white)
-                                .font(.system(size: 13))
-                                .padding(6)
-                        }
-                        Spacer()
-                    }
-                    .frame(width: size, height: size)
-                }
-                
-                // Imported to Mac Checkmark Badge (Bottom Right for Pictures Section)
-                if isPicturesSection {
-                    let localImported = iPhoneManager.shared.importDirectoryURL.appendingPathComponent(item.filename).path
-                    if item.syncStatus == .committed || FileManager.default.fileExists(atPath: localImported) {
-                        VStack {
-                            Spacer()
-                            HStack {
-                                Spacer()
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                    .font(.system(size: max(14, size * 0.14)))
-                                    .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
-                                    .padding(6)
-                            }
-                        }
-                        .frame(width: size, height: size)
-                    }
-                } else if !isNASSection {
-                    // Git-for-Files Badge (Bottom Right)
-                    FileBadgeView(status: item.syncStatus, size: max(16, size * 0.16))
-                        .padding(6)
-                }
-            }
+        VStack(spacing: 5) {
+            // Visual Area (Thumbnail / Icon taking natural rectangular proportions)
+            visualThumbnailArea
             
-            // Item / Folder Name Label
-            Text(item.filename)
-                .font(.system(size: max(10, min(12, size * 0.085))))
-                .fontWeight(isSelected ? .medium : .regular)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .truncationMode(.middle)
-                .foregroundColor(isSelected ? .accentColor : (isHovered ? .accentColor : .primary))
-                .textSelection(.disabled)
-                .frame(width: size + 16, alignment: .top)
+            // Labels Area (Filename + Finder item info)
+            labelsArea
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelected ? Color.white.opacity(0.08) : (isHovered ? Color.white.opacity(0.05) : Color.clear))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(isSelected ? Color.white.opacity(0.26) : Color.clear, lineWidth: 1)
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             onToggleSelect?()
         }
         .onHover { isHovered = $0 }
         .onAppear {
+            if item.originalPath.hasPrefix("nas://") {
+                if let cached = NASThumbnailLoader.shared.getCachedThumbnail(for: item.originalPath) {
+                    self.nsImage = cached
+                }
+            }
             loadThumbnail()
+            loadInfo()
+        }
+        .onDisappear {
+            if item.originalPath.hasPrefix("nas://") {
+                NASThumbnailLoader.shared.cancelLoad(for: item.originalPath)
+            }
         }
         .onReceive(iPhoneManager.shared.$thumbnailsVersion) { _ in
             if item.originalPath.hasPrefix("iPhone://") && nsImage == nil {
@@ -623,8 +505,143 @@ public struct PhotoThumbnailCell: View {
         }
     }
     
+    // MARK: - Visual Media / Icon Area
+    private var visualThumbnailArea: some View {
+        ZStack(alignment: .bottomTrailing) {
+            // Baseline-aligned thumbnail / icon container
+            ZStack(alignment: .bottom) {
+                if let img = nsImage {
+                    if isDirectoryOrDoc {
+                        // Standard macOS document or folder icon
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: size, maxHeight: size)
+                    } else {
+                        // Photo or Video thumbnail: natural aspect ratio rectangle with subtle shadow
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: size, maxHeight: size)
+                            .cornerRadius(3.5)
+                            .shadow(color: Color.black.opacity(0.32), radius: 3, x: 0, y: 1.5)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3.5)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                            )
+                    }
+                } else if item.isDirectory {
+                    // Authentic macOS Finder folder icon
+                    Image(nsImage: NSWorkspace.shared.icon(for: .folder))
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: size, maxHeight: size)
+                } else {
+                    // Fallback placeholder icon
+                    Image(systemName: item.isLivePhotoVideo ? "play.rectangle.fill" : (item.isImageOrVideo ? "photo" : "doc.fill"))
+                        .font(.system(size: size * 0.45))
+                        .foregroundColor(.secondary.opacity(0.6))
+                        .frame(maxWidth: size, maxHeight: size)
+                }
+            }
+            .frame(width: size, height: size, alignment: .bottom)
+            
+            // Selection Checkbox for Pictures Section (Top Left)
+            if isPicturesSection {
+                VStack {
+                    HStack {
+                        Button {
+                            onToggleSelect?()
+                        } label: {
+                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(isSelected ? .accentColor : (isHovered ? .white : .clear))
+                                .font(.system(size: max(16, size * 0.16)))
+                                .background(
+                                    Circle()
+                                        .fill(isSelected ? Color.clear : (isHovered ? Color.black.opacity(0.4) : Color.clear))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(4)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .frame(width: size, height: size)
+            } else if item.isFavorite {
+                // Favorite Badge (Top Left)
+                VStack {
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.pink)
+                            .font(.system(size: 11))
+                            .padding(4)
+                            .background(Circle().fill(Color.black.opacity(0.6)))
+                            .padding(4)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .frame(width: size, height: size)
+            }
+            
+            // Sync / Imported Status Badge (Bottom Right)
+            if isPicturesSection {
+                let localImported = iPhoneManager.shared.importDirectoryURL.appendingPathComponent(item.filename).path
+                if item.syncStatus == .committed || FileManager.default.fileExists(atPath: localImported) {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: max(14, size * 0.14)))
+                                .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+                                .padding(2)
+                        }
+                    }
+                    .frame(width: size, height: size)
+                }
+            } else if !isNASSection {
+                FileBadgeView(status: item.syncStatus, size: max(14, min(17, size * 0.16)))
+                    .padding(1)
+            }
+        }
+    }
+    
+    // MARK: - Labels Area
+    private var labelsArea: some View {
+        VStack(spacing: 2) {
+            Text(item.filename)
+                .font(.system(size: labelFontSize))
+                .fontWeight(isSelected ? .medium : .regular)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .truncationMode(.middle)
+                .foregroundColor(.primary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1.5)
+                .textSelection(.disabled)
+                .frame(maxWidth: max(size + 44, 134), alignment: .top)
+            
+            // Finder "Show item info" Subtitle (Dimensions, Duration, Item count, Size)
+            if !itemInfo.isEmpty {
+                Text(itemInfo)
+                    .font(.system(size: subtitleFontSize))
+                    .foregroundColor(Color.accentColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: max(size + 44, 134))
+            }
+        }
+    }
+    
     private func loadThumbnail() {
         guard nsImage == nil else { return }
+        if item.isDirectory {
+            self.nsImage = NSWorkspace.shared.icon(for: .folder)
+            return
+        }
         if item.originalPath.hasPrefix("iPhone://") {
             iPhoneManager.shared.loadThumbnail(for: item.filename) { image in
                 if let image = image {
@@ -632,11 +649,31 @@ public struct PhotoThumbnailCell: View {
                 }
             }
         } else if item.originalPath.hasPrefix("nas://") {
-            return
+            let relativePath = item.originalPath.replacingOccurrences(of: "nas://", with: "")
+            if let cached = NASThumbnailLoader.shared.getCachedThumbnail(for: relativePath) {
+                self.nsImage = cached
+                return
+            }
+            NASThumbnailLoader.shared.loadThumbnail(for: relativePath, baseUrl: NASClient.shared.getBaseUrl(), targetSize: max(160, size * 2)) { image in
+                if let image = image {
+                    self.nsImage = image
+                }
+            }
         } else {
-            ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: size) { image in
+            ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: max(160, size * 2)) { image in
                 self.nsImage = image
             }
+        }
+    }
+    
+    private func loadInfo() {
+        if !itemInfo.isEmpty { return }
+        if let cached = ItemInfoLoader.shared.getCachedInfo(for: item.originalPath) {
+            self.itemInfo = cached
+            return
+        }
+        ItemInfoLoader.shared.loadInfo(for: item) { info in
+            self.itemInfo = info
         }
     }
 }

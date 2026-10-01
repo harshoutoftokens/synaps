@@ -50,11 +50,20 @@ public struct MainView: View {
                 }
                 
                 // Bottom Sync Status & Action Bar
-                SyncStatusBar(viewModel: viewModel)
+                SyncStatusBar(viewModel: viewModel, isGridMode: displayMode == .grid || viewModel.selectedSidebarItem?.isPhone == true)
             }
             .navigationTitle(viewModel.selectedSidebarItem?.title ?? "Synaps")
-            .navigationSubtitle(viewModel.isNASSection ? viewModel.currentFolderPath : (viewModel.selectedSidebarItem?.path ?? ""))
             .toolbar {
+                ToolbarItemGroup(placement: .navigation) {
+                    Button {
+                        viewModel.navigateBack()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(viewModel.navigationHistory.isEmpty)
+                    .help("Back")
+                }
+                
                 ToolbarItemGroup(placement: .primaryAction) {
                     // Filter Picker (All / 🔴 Uncommitted / 🟢 Committed)
                     if !viewModel.isNASSection {
@@ -137,9 +146,7 @@ public struct MainView: View {
                     
                     // Refresh Button
                     Button {
-                        if let sel = viewModel.selectedSidebarItem {
-                            viewModel.selectSidebarItem(sel)
-                        }
+                        viewModel.refreshCurrentFolder()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
