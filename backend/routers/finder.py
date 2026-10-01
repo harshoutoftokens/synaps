@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 
 from config import STORAGE_PATH, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from thumbnails import get_thumbnail_path, enqueue_thumbnail, generate_image_thumbnail
 
 logger = logging.getLogger("synaps.finder")
 
@@ -148,6 +149,80 @@ def download_file(path: str = Query(..., description="Relative path from storage
         media_type=mime_type or "application/octet-stream",
         filename=filename,
     )
+
+
+@router.get("/thumbnail")
+def get_file_thumbnail(path: str = Query(..., description="Relative path from storage root")):
+    """
+    Get or enqueue a lightweight WebP thumbnail for a file on the NAS.
+    Optimized for Core 2 Duo NAS hardware:
+    1. Fast path: checks deterministic disk cache first (0% CPU, instantaneous file response).
+    2. Fallback: queries database for indexed thumbnail path if stored under an alias.
+    3. On-demand: enqueues to single background LIFO worker (never overwhelms NAS CPU/RAM).
+    4. HTTP caching: sets Cache-Control so the Mac client caches to SSD permanently.
+    """
+    clean_path = os.path.normpath(path).lstrip("/")
+    if ".." in clean_path:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    full_path = os.path.join(STORAGE_PATH, clean_path)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=400, detail="Not a file")
+
+    # 1. Deterministic thumbnail path from storage path
+    thumb_path = get_thumbnail_path(full_path)
+    if os.path.exists(thumb_path):
+        return FileResponse(
+            thumb_path,
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=604800, immutable"}
+        )
+
+    # 2. Check if clean_path itself was hashed
+    alt_thumb_path = get_thumbnail_path(clean_path)
+    if os.path.exists(alt_thumb_path):
+        return FileResponse(
+            alt_thumb_path,
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=604800, immutable"}
+        )
+
+    # 3. Check database record if available
+    try:
+        from database import SessionLocal
+        from models import MediaFile
+        with SessionLocal() as db:
+            media = db.query(MediaFile).filter(
+                (MediaFile.relative_path == clean_path) | (MediaFile.path == full_path)
+            ).first()
+            if media and media.thumbnail_path and os.path.exists(media.thumbnail_path):
+                return FileResponse(
+                    media.thumbnail_path,
+                    media_type="image/webp",
+                    headers={"Cache-Control": "public, max-age=604800, immutable"}
+                )
+    except Exception as db_err:
+        logger.debug(f"Database lookup failed: {db_err}")
+
+    # 4. Enqueue for generation in background LIFO queue
+    ext = os.path.splitext(full_path)[1].lower()
+    if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:
+        enqueue_thumbnail(full_path)
+        # Small image fast path: generate synchronously only for small images under 2.5MB
+        if ext in (".jpg", ".jpeg", ".png", ".webp") and os.path.getsize(full_path) < 2500000:
+            try:
+                if generate_image_thumbnail(full_path, thumb_path):
+                    return FileResponse(
+                        thumb_path,
+                        media_type="image/webp",
+                        headers={"Cache-Control": "public, max-age=604800, immutable"}
+                    )
+            except Exception as e:
+                logger.debug(f"Sync thumbnail gen failed: {e}")
+
+    raise HTTPException(status_code=202, detail="Thumbnail queued for generation")
 
 
 @router.get("/tree")

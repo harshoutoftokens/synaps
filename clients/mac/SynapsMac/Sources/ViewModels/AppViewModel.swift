@@ -119,6 +119,7 @@ public final class AppViewModel: ObservableObject {
     private let scanner = LocalFileScanner.shared
     private let nasClient = NASClient.shared
     private let cacheStore = LocalCacheStore.shared
+    private let reconciliationEngine = NASReconciliationEngine.shared
     public let phoneManager = iPhoneManager.shared
     
     private var cancellables = Set<AnyCancellable>()
@@ -184,10 +185,16 @@ public final class AppViewModel: ObservableObject {
                     }
                 }
                 
-                await self.runPreCheckDeduplication(
-                    items: hashedItems,
-                    sourceId: self.selectedSidebarItem?.sourceId ?? "mac_harsh"
-                )
+                if self.nasOnline {
+                    let sourceId = self.selectedSidebarItem?.sourceId ?? "mac_harsh"
+                    let reconciled = await self.reconciliationEngine.reconcileHashedItems(
+                        hashedItems: hashedItems,
+                        currentFileItems: self.fileItems,
+                        sourceId: sourceId
+                    )
+                    self.fileItems = reconciled
+                    self.loadRecentActivities()
+                }
             }
         }
     }
@@ -332,7 +339,19 @@ public final class AppViewModel: ObservableObject {
         }
         
         if online && wasOffline && !self.fileItems.isEmpty {
-            await runPreCheckDeduplication(items: self.fileItems, sourceId: selectedSidebarItem?.sourceId ?? "mac_harsh")
+            if !self.currentFolderPath.isEmpty && !self.isNASSection && !self.isPicturesSection {
+                let title = (self.currentFolderPath as NSString).lastPathComponent
+                let sourceLocation = self.selectedSidebarItem?.title ?? title
+                let sourceId = self.selectedSidebarItem?.sourceId ?? "mac_harsh"
+                let reconciled = await self.reconciliationEngine.reconcileDirectory(
+                    directoryPath: self.currentFolderPath,
+                    sourceLocation: sourceLocation,
+                    localItems: self.fileItems,
+                    sourceId: sourceId
+                )
+                self.fileItems = reconciled
+                self.loadRecentActivities()
+            }
         }
     }
     
@@ -651,68 +670,48 @@ public final class AppViewModel: ObservableObject {
             self.fileItems = items
             self.isLoading = false
             
-            // Run pre-check deduplication in background to instantly update badges from NAS
-            await runPreCheckDeduplication(items: items, sourceId: sourceId)
+            // Run authoritative NAS reconciliation
+            if self.nasOnline {
+                let reconciled = await self.reconciliationEngine.reconcileDirectory(
+                    directoryPath: path,
+                    sourceLocation: sourceLocation,
+                    localItems: items,
+                    sourceId: sourceId
+                )
+                guard self.currentFolderPath == path else { return }
+                self.fileItems = reconciled
+                self.loadRecentActivities()
+            }
+        }
+    }
+    
+    public func refreshCurrentFolder() {
+        if isNASSection {
+            loadNASFolder(path: currentNASRelativePath)
+        } else if isPicturesSection {
+            phoneManager.checkDeviceStatus()
+            self.fileItems = phoneManager.phoneMediaItems
+        } else if !currentFolderPath.isEmpty {
+            let title = (currentFolderPath as NSString).lastPathComponent
+            loadFolder(
+                path: currentFolderPath,
+                sourceLocation: selectedSidebarItem?.title ?? title,
+                sourceId: selectedSidebarItem?.sourceId ?? "mac_harsh"
+            )
+        } else if let sel = selectedSidebarItem {
+            selectSidebarItem(sel)
         }
     }
     
     public func runPreCheckDeduplication(items: [SynapsFileItem], sourceId: String) async {
         guard nasOnline else { return }
-        let uncommitted = items.filter { !$0.isDirectory && $0.syncStatus == .uncommitted && $0.sha256 != nil }
-        guard !uncommitted.isEmpty else { return }
-        
-        do {
-            let res = try await nasClient.batchPreCheck(
-                sourceId: sourceId,
-                friendlyName: "Harsh's Mac",
-                platform: "macOS",
-                items: uncommitted
-            )
-            
-            let dedupPaths = Set(res.results.filter { $0.status == "dedup_linked" }.map { $0.original_path })
-            if !dedupPaths.isEmpty {
-                for p in dedupPaths {
-                    if let targetItem = uncommitted.first(where: { $0.originalPath == p }) {
-                        cacheStore.recordItemSynced(
-                            path: targetItem.originalPath,
-                            fileSize: targetItem.fileSize,
-                            modifiedAt: targetItem.modifiedAt,
-                            sha256: targetItem.sha256,
-                            album: targetItem.albumName,
-                            isFavorite: targetItem.isFavorite
-                        )
-                    } else {
-                        cacheStore.markSynced(paths: [p], status: .committed)
-                    }
-                    
-                    let fn = (p as NSString).lastPathComponent
-                    cacheStore.logActivity(
-                        eventType: .existingDiscovered,
-                        filePath: p,
-                        filename: fn,
-                        details: "Existing file detected on NAS (SHA-256 match)",
-                        sourceId: sourceId
-                    )
-                }
-                loadRecentActivities()
-                
-                // Update local fileItems state
-                for i in 0..<fileItems.count {
-                    if dedupPaths.contains(fileItems[i].originalPath) {
-                        fileItems[i].syncStatus = .committed
-                    }
-                }
-                
-                // Re-evaluate folder sync statuses in current fileItems
-                for i in 0..<fileItems.count {
-                    if fileItems[i].isDirectory {
-                        fileItems[i].syncStatus = LocalFileScanner.shared.evaluateFolderSyncStatus(folderPath: fileItems[i].originalPath)
-                    }
-                }
-            }
-        } catch {
-            print("Pre-check error: \(error.localizedDescription)")
-        }
+        let reconciled = await reconciliationEngine.reconcileHashedItems(
+            hashedItems: items,
+            currentFileItems: self.fileItems,
+            sourceId: sourceId
+        )
+        self.fileItems = reconciled
+        self.loadRecentActivities()
     }
     
     public func syncAllUncommitted() {

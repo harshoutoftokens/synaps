@@ -435,8 +435,18 @@ public struct PhotoThumbnailCell: View {
         }
         .onHover { isHovered = $0 }
         .onAppear {
+            if item.originalPath.hasPrefix("nas://") {
+                if let cached = NASThumbnailLoader.shared.getCachedThumbnail(for: item.originalPath) {
+                    self.nsImage = cached
+                }
+            }
             loadThumbnail()
             loadInfo()
+        }
+        .onDisappear {
+            if item.originalPath.hasPrefix("nas://") {
+                NASThumbnailLoader.shared.cancelLoad(for: item.originalPath)
+            }
         }
         .onReceive(iPhoneManager.shared.$thumbnailsVersion) { _ in
             if item.originalPath.hasPrefix("iPhone://") && nsImage == nil {
@@ -639,7 +649,16 @@ public struct PhotoThumbnailCell: View {
                 }
             }
         } else if item.originalPath.hasPrefix("nas://") {
-            return
+            let relativePath = item.originalPath.replacingOccurrences(of: "nas://", with: "")
+            if let cached = NASThumbnailLoader.shared.getCachedThumbnail(for: relativePath) {
+                self.nsImage = cached
+                return
+            }
+            NASThumbnailLoader.shared.loadThumbnail(for: relativePath, baseUrl: NASClient.shared.getBaseUrl(), targetSize: max(160, size * 2)) { image in
+                if let image = image {
+                    self.nsImage = image
+                }
+            }
         } else {
             ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: max(160, size * 2)) { image in
                 self.nsImage = image
