@@ -146,9 +146,7 @@ public struct MainView: View {
                     
                     // Refresh Button
                     Button {
-                        if let sel = viewModel.selectedSidebarItem {
-                            viewModel.selectSidebarItem(sel)
-                        }
+                        viewModel.refreshCurrentFolder()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
