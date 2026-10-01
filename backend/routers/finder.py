@@ -206,38 +206,22 @@ def get_file_thumbnail(path: str = Query(..., description="Relative path from st
     except Exception as db_err:
         logger.debug(f"Database lookup failed: {db_err}")
 
-    # 4. Immediate fast-path generation for images and videos:
+    # 4. Media extensions check
     ext = os.path.splitext(full_path)[1].lower()
-    if ext not in ALL_EXTENSIONS and ext not in (".heic", ".heif", ".mov", ".mp4", ".m4v", ".jpg", ".jpeg", ".png", ".webp"):
+    media_exts = ALL_EXTENSIONS | {".heic", ".heif", ".mov", ".mp4", ".m4v", ".jpg", ".jpeg", ".png", ".webp", ".pdf"}
+    if ext not in media_exts:
         raise HTTPException(status_code=404, detail="File type does not support thumbnails")
 
-    # A) Images (JPEG, PNG, WebP, HEIC/HEIF) under 8MB:
-    if ext in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif") and os.path.getsize(full_path) < 8 * 1024 * 1024:
-        try:
-            if generate_image_thumbnail(full_path, thumb_path):
-                return FileResponse(
-                    thumb_path,
-                    media_type="image/webp",
-                    headers={"Cache-Control": "public, max-age=604800, immutable"}
-                )
-        except Exception as e:
-            logger.debug(f"Sync image thumbnail gen failed: {e}")
-
-    # B) Videos (.mov, .mp4) under 200MB:
-    if ext in (".mov", ".mp4", ".m4v") and os.path.getsize(full_path) < 200 * 1024 * 1024:
-        try:
-            if generate_video_thumbnail(full_path, thumb_path):
-                return FileResponse(
-                    thumb_path,
-                    media_type="image/webp",
-                    headers={"Cache-Control": "public, max-age=604800, immutable"}
-                )
-        except Exception as e:
-            logger.debug(f"Sync video thumbnail gen failed: {e}")
-
-    # Fallback: Enqueue for background LIFO worker for very large files
+    # 5. Non-blocking background enqueue: return 202 Accepted immediately
+    # Never transcode heavy 4K videos or 48MP HEICs synchronously in HTTP request workers!
     enqueue_thumbnail(full_path)
-    raise HTTPException(status_code=202, detail="Thumbnail queued for generation")
+    from fastapi.responses import Response
+    return Response(
+        content=b'{"status":"queued"}',
+        status_code=202,
+        media_type="application/json",
+        headers={"Retry-After": "2"}
+    )
 
 
 @router.get("/tree")

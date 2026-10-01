@@ -226,12 +226,27 @@ public struct PhotosGridView: View {
             } else if viewModel.filteredItems.isEmpty {
                 Spacer()
                 VStack(spacing: 12) {
-                    Image(systemName: "folder")
+                    Image(systemName: viewModel.syncStatusMessage.contains("Failed") ? "exclamationmark.triangle" : "folder")
                         .font(.system(size: 40))
-                        .foregroundColor(.secondary)
-                    Text("No Items Found")
+                        .foregroundColor(viewModel.syncStatusMessage.contains("Failed") ? .orange : .secondary)
+                    Text(viewModel.syncStatusMessage.contains("Failed") ? "Could Not Load Items" : "No Items Found")
                         .font(.headline)
                         .foregroundColor(.secondary)
+                    if viewModel.syncStatusMessage.contains("Failed") {
+                        Text(viewModel.syncStatusMessage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 320)
+                        Button("Try Again") {
+                            if viewModel.isNASSection {
+                                viewModel.loadNASFolder(path: viewModel.currentNASRelativePath)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                    }
                 }
                 Spacer()
             } else {
@@ -665,7 +680,9 @@ public struct PhotoThumbnailCell: View {
             }
             NASThumbnailLoader.shared.loadThumbnail(for: relativePath, baseUrl: NASClient.shared.getBaseUrl(), targetSize: max(160, size * 2)) { image in
                 if let image = image {
-                    self.nsImage = image
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.nsImage = image
+                    }
                 }
             }
         } else {

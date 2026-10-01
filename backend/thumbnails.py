@@ -40,16 +40,17 @@ def get_thumbnail_path(file_path: str) -> str:
 
 
 def generate_image_thumbnail(source_path: str, thumb_path: str) -> bool:
-    """Generate a thumbnail for an image file (JPEG, PNG, WebP, HEIC)."""
+    """Generate a thumbnail for an image file (JPEG, PNG, WebP, HEIC).
+    Optimized for Core 2 Duo: uses BILINEAR scaling and fast WebP encoding."""
     try:
         with Image.open(source_path) as img:
             # Convert RGBA/P to RGB for WebP compatibility
             if img.mode in ('RGBA', 'LA', 'P'):
                 img = img.convert('RGB')
 
-            # Use LANCZOS for high quality downscaling
-            img.thumbnail(THUMBNAIL_SIZE, Image.LANCZOS)
-            img.save(thumb_path, "WEBP", quality=THUMBNAIL_QUALITY, optimize=True)
+            # Use BILINEAR for fast, low-CPU downscaling on weak hardware
+            img.thumbnail(THUMBNAIL_SIZE, Image.BILINEAR)
+            img.save(thumb_path, "WEBP", quality=THUMBNAIL_QUALITY, method=0)
             return True
     except Exception as e:
         logger.error(f"Image thumbnail failed: {source_path}: {e}")
@@ -58,31 +59,15 @@ def generate_image_thumbnail(source_path: str, thumb_path: str) -> bool:
 
 def generate_video_thumbnail(source_path: str, thumb_path: str) -> bool:
     """Generate a thumbnail for a video using ffmpeg.
-    Extracts a single frame at 0.5s — lightweight for Core2Duo."""
+    Extracts a single frame at 0.5s with -threads 1 to preserve CPU responsiveness."""
     try:
-        # First try at 0.5s, fallback to first frame if video is very short
+        # Fast input seek with single thread (so the 2nd core remains 100% free for API browsing)
         result = subprocess.run(
             [
                 "ffmpeg", "-y",
-                "-ss", "0.5",           # Seek to 0.5s
-                "-i", source_path,
-                "-vframes", "1",         # Extract exactly 1 frame
-                "-vf", f"scale={THUMBNAIL_SIZE[0]}:-1",
-                "-q:v", "5",
-                "-loglevel", "error",    # Suppress verbose output
-                thumb_path
-            ],
-            capture_output=True,
-            timeout=30,
-        )
-
-        if result.returncode == 0 and os.path.exists(thumb_path):
-            return True
-
-        # Fallback: try first frame (for very short videos)
-        result = subprocess.run(
-            [
-                "ffmpeg", "-y",
+                "-threads", "1",
+                "-ss", "0.5",
+                "-noaccurate_seek",
                 "-i", source_path,
                 "-vframes", "1",
                 "-vf", f"scale={THUMBNAIL_SIZE[0]}:-1",
@@ -91,7 +76,26 @@ def generate_video_thumbnail(source_path: str, thumb_path: str) -> bool:
                 thumb_path
             ],
             capture_output=True,
-            timeout=30,
+            timeout=10,
+        )
+
+        if result.returncode == 0 and os.path.exists(thumb_path):
+            return True
+
+        # Fallback: try first frame (for very short clips)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-threads", "1",
+                "-i", source_path,
+                "-vframes", "1",
+                "-vf", f"scale={THUMBNAIL_SIZE[0]}:-1",
+                "-q:v", "5",
+                "-loglevel", "error",
+                thumb_path
+            ],
+            capture_output=True,
+            timeout=10,
         )
         return result.returncode == 0 and os.path.exists(thumb_path)
 
@@ -174,6 +178,21 @@ def _thumbnail_worker():
                 
                 if success:
                     logger.debug(f"Generated thumbnail: {os.path.basename(source_path)}")
+                    try:
+                        from database import SessionLocal
+                        from models import MediaFile
+                        from config import STORAGE_PATH
+                        with SessionLocal() as db:
+                            rel_path = os.path.relpath(source_path, STORAGE_PATH)
+                            media = db.query(MediaFile).filter(
+                                (MediaFile.path == source_path) | (MediaFile.relative_path == rel_path)
+                            ).first()
+                            if media:
+                                media.has_thumbnail = True
+                                media.thumbnail_path = thumb_path
+                                db.commit()
+                    except Exception as db_e:
+                        logger.debug(f"DB update failed: {db_e}")
                 gc.collect()
             
             with _queue_lock:
