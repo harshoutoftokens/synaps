@@ -642,6 +642,15 @@ public struct PhotoThumbnailCell: View {
             self.nsImage = NSWorkspace.shared.icon(for: .folder)
             return
         }
+        guard item.isImageOrVideo else {
+            let ext = (item.filename as NSString).pathExtension.lowercased()
+            if !ext.isEmpty, let ut = UTType(filenameExtension: ext) {
+                self.nsImage = NSWorkspace.shared.icon(for: ut)
+            } else {
+                self.nsImage = NSWorkspace.shared.icon(for: .data)
+            }
+            return
+        }
         if item.originalPath.hasPrefix("iPhone://") {
             iPhoneManager.shared.loadThumbnail(for: item.filename) { image in
                 if let image = image {

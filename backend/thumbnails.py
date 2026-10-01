@@ -147,11 +147,13 @@ import queue
 import threading
 
 # Setup background worker queue
-# Use a LIFO queue so the most recently requested thumbnails (what the user is currently looking at) are processed first
 thumbnail_queue = queue.LifoQueue()
+_enqueued_paths = set()
+_queue_lock = threading.Lock()
 
 def _thumbnail_worker():
-    """Background worker that continuously processes the thumbnail queue."""
+    """Background worker that continuously processes the thumbnail queue with strict memory control."""
+    import gc
     while True:
         try:
             item = thumbnail_queue.get()
@@ -160,7 +162,7 @@ def _thumbnail_worker():
             
             source_path, thumb_path = item
             
-            if not os.path.exists(thumb_path):
+            if not os.path.exists(thumb_path) and os.path.exists(source_path):
                 ext = os.path.splitext(source_path)[1].lower()
                 success = False
                 if ext in VIDEO_EXTENSIONS:
@@ -172,17 +174,21 @@ def _thumbnail_worker():
                 
                 if success:
                     logger.debug(f"Generated thumbnail: {os.path.basename(source_path)}")
+                gc.collect()
             
+            with _queue_lock:
+                _enqueued_paths.discard(source_path)
             thumbnail_queue.task_done()
         except Exception as e:
             logger.error(f"Thumbnail worker error: {e}")
-            if 'item' in locals() and hasattr(item, '__len__') and len(item) == 2:
-                thumbnail_queue.task_done()
+            if 'source_path' in locals():
+                with _queue_lock:
+                    _enqueued_paths.discard(source_path)
+            thumbnail_queue.task_done()
 
-# Start multiple worker threads (2 for Core2Duo)
-for _ in range(2):
-    worker_thread = threading.Thread(target=_thumbnail_worker, daemon=True)
-    worker_thread.start()
+# Start 1 dedicated worker thread (optimal for Core2Duo to avoid CPU & RAM thrashing)
+worker_thread = threading.Thread(target=_thumbnail_worker, daemon=True)
+worker_thread.start()
 
 def enqueue_thumbnail(source_path: str) -> str:
     """Enqueue a thumbnail for background generation and return its expected path."""
@@ -190,7 +196,10 @@ def enqueue_thumbnail(source_path: str) -> str:
     thumb_path = get_thumbnail_path(source_path)
     
     if not os.path.exists(thumb_path):
-        thumbnail_queue.put((source_path, thumb_path))
+        with _queue_lock:
+            if source_path not in _enqueued_paths:
+                _enqueued_paths.add(source_path)
+                thumbnail_queue.put((source_path, thumb_path))
         
     return thumb_path
 

@@ -136,9 +136,10 @@ public final class NASThumbnailLoader {
                         completion(img)
                     }
                     return
-                } else if http.statusCode == 202 && retryCount < 2 {
-                    // Queued on NAS background LIFO worker; retry after 1.5 seconds
-                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                } else if http.statusCode == 202 && retryCount < 10 {
+                    // Queued on NAS background LIFO worker; retry with progressive backoff
+                    let delay = min(1.0 + Double(retryCount) * 0.6, 3.5)
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
                         self?.fetchFromNAS(cleanPath: cleanPath, baseUrl: baseUrl, retryCount: retryCount + 1, completion: completion)
                     }
                     return
@@ -166,7 +167,8 @@ public final class NASThumbnailLoader {
     }
     
     private func diskCacheURLFor(relativePath: String) -> URL {
-        let hash = Insecure.MD5.hash(data: Data(relativePath.utf8))
+        let cleanPath = relativePath.replacingOccurrences(of: "nas://", with: "")
+        let hash = Insecure.MD5.hash(data: Data(cleanPath.utf8))
         let hex = hash.map { String(format: "%02hhx", $0) }.joined()
         return diskCacheURL.appendingPathComponent("\(hex).webp")
     }
