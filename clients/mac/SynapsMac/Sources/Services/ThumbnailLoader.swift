@@ -23,6 +23,18 @@ public final class ThumbnailLoader {
         queue.async {
             autoreleasepool {
                 let url = URL(fileURLWithPath: path)
+                // Fast-path directories to system folder icon
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+                    let icon = NSWorkspace.shared.icon(forFile: path)
+                    icon.size = NSSize(width: max(targetSize, 128), height: max(targetSize, 128))
+                    self.cache.setObject(icon, forKey: key)
+                    DispatchQueue.main.async {
+                        completion(icon)
+                    }
+                    return
+                }
+                
                 let ext = url.pathExtension.lowercased()
                 
                 // For standard image formats: use CoreGraphics downsampled decoding (only decodes thumbnail, never full 48MP bitmap!)
@@ -37,8 +49,10 @@ public final class ThumbnailLoader {
                     
                     if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
                        let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
-                        let thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: targetSize, height: targetSize))
-                        self.cache.setObject(thumbnail, forKey: key, cost: Int(targetSize * targetSize * 4))
+                        let w = CGFloat(cgImage.width)
+                        let h = CGFloat(cgImage.height)
+                        let thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: w / 2.0, height: h / 2.0))
+                        self.cache.setObject(thumbnail, forKey: key, cost: Int(w * h * 4))
                         DispatchQueue.main.async {
                             completion(thumbnail)
                         }
@@ -49,7 +63,7 @@ public final class ThumbnailLoader {
                 // For videos and complex formats: use QuickLookThumbnailGenerator
                 let request = QLThumbnailGenerator.Request(
                     fileAt: url,
-                    size: CGSize(width: targetSize, height: targetSize),
+                    size: CGSize(width: targetSize * 2, height: targetSize * 2),
                     scale: 2.0,
                     representationTypes: .thumbnail
                 )
@@ -64,6 +78,7 @@ public final class ThumbnailLoader {
                     } else {
                         // Fallback to system icon
                         let icon = NSWorkspace.shared.icon(forFile: path)
+                        icon.size = NSSize(width: max(targetSize, 128), height: max(targetSize, 128))
                         DispatchQueue.main.async {
                             completion(icon)
                         }

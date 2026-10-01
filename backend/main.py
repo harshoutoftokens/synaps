@@ -84,6 +84,7 @@ app.include_router(settings_router)
 app.include_router(imports_router)
 
 
+@app.get("/health")
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": "Synaps", "version": "1.0.0"}
