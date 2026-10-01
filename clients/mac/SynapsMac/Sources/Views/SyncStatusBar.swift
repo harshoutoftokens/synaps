@@ -2,6 +2,13 @@ import SwiftUI
 
 public struct SyncStatusBar: View {
     @ObservedObject var viewModel: AppViewModel
+    public var isGridMode: Bool = true
+    @AppStorage("photosGridSize") private var gridSize: Double = 80
+    
+    public init(viewModel: AppViewModel, isGridMode: Bool = true) {
+        self.viewModel = viewModel
+        self.isGridMode = isGridMode
+    }
     
     public var body: some View {
         HStack(spacing: 16) {
@@ -49,19 +56,31 @@ public struct SyncStatusBar: View {
                     Text(viewModel.syncStatusMessage)
                         .font(.caption)
                         .foregroundColor(.primary)
-                } else if viewModel.uncommittedCount > 0 {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.red)
-                    Text("\(viewModel.uncommittedCount) uncommitted (\(viewModel.totalUncommittedSizeFormatted))")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
                 } else {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("All files committed to NAS Vault")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 6) {
+                        if viewModel.uncommittedCount > 0 {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.red)
+                            Text("\(viewModel.uncommittedCount) uncommitted (\(viewModel.totalUncommittedSizeFormatted))")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.primary)
+                        } else {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("All files committed")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary.opacity(0.5))
+                        
+                        Text("\(viewModel.filteredItems.count) items")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             
@@ -85,12 +104,12 @@ public struct SyncStatusBar: View {
             if viewModel.isPicturesSection && viewModel.phoneManager.isImporting {
                 ProgressView(value: viewModel.phoneManager.importProgress)
                     .progressViewStyle(.linear)
-                    .frame(width: 140)
+                    .frame(width: 120)
             } else if viewModel.isSyncing {
                 HStack(spacing: 8) {
                     ProgressView(value: viewModel.syncProgress)
                         .progressViewStyle(.linear)
-                        .frame(width: 140)
+                        .frame(width: 120)
                     
                     if viewModel.syncSpeedMBs > 0 {
                         Text(String(format: "%.1f MB/s", viewModel.syncSpeedMBs))
@@ -100,35 +119,51 @@ public struct SyncStatusBar: View {
                 }
             }
             
+            // Zoom Slider (Finder style in bottom bar)
+            if isGridMode {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.grid.3x3")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    
+                    Slider(value: $gridSize, in: 80...240)
+                        .frame(width: 80)
+                    
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .help("Adjust thumbnail size")
+            }
+            
             if viewModel.isPicturesSection {
                 // iPhone Import Action Buttons
                 if !viewModel.selectedItemIds.isEmpty {
                     Button {
                         viewModel.importSelectedItems()
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 5) {
                             Image(systemName: "square.and.arrow.down")
-                            Text("Import Selected (\(viewModel.selectedItemIds.count))")
-                                .fontWeight(.semibold)
+                            Text("Import (\(viewModel.selectedItemIds.count))")
+                                .fontWeight(.medium)
                         }
-                        .padding(.horizontal, 8)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.accentColor)
+                    .controlSize(.small)
                     .disabled(viewModel.phoneManager.isImporting)
                 }
                 
                 Button {
                     viewModel.importAllItems()
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: "arrow.down.circle.fill")
                         Text("Import All")
-                            .fontWeight(.semibold)
+                            .fontWeight(.medium)
                     }
-                    .padding(.horizontal, 8)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .disabled(viewModel.phoneManager.isImporting || viewModel.filteredItems.isEmpty)
             } else if !viewModel.isNASSection {
                 // Sync Selected Action Button
@@ -136,15 +171,14 @@ public struct SyncStatusBar: View {
                     Button {
                         viewModel.syncSelectedItems()
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 5) {
                             Image(systemName: "arrow.triangle.2.circlepath")
-                            Text(viewModel.isSyncing ? "Syncing..." : "Sync Selected (\(viewModel.selectedItemIds.count))")
-                                .fontWeight(.semibold)
+                            Text(viewModel.isSyncing ? "Syncing..." : "Sync (\(viewModel.selectedItemIds.count))")
+                                .fontWeight(.medium)
                         }
-                        .padding(.horizontal, 8)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.accentColor)
+                    .controlSize(.small)
                     .disabled(viewModel.isSyncing || !viewModel.nasOnline)
                 }
                 
@@ -152,20 +186,20 @@ public struct SyncStatusBar: View {
                 Button {
                     viewModel.syncAllUncommitted()
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: "arrow.triangle.2.circlepath")
                         Text(viewModel.isSyncing ? "Syncing..." : "Sync All")
-                            .fontWeight(.semibold)
+                            .fontWeight(.medium)
                     }
-                    .padding(.horizontal, 8)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .tint(viewModel.uncommittedCount > 0 ? Color.accentColor : Color.secondary)
                 .disabled(viewModel.isSyncing || viewModel.uncommittedCount == 0 || !viewModel.nasOnline)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(Divider(), alignment: .top)
     }

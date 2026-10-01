@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 public struct FileListView: View {
     @ObservedObject var viewModel: AppViewModel
@@ -14,57 +15,6 @@ public struct FileListView: View {
     
     public var body: some View {
         VStack(spacing: 0) {
-            // Header stats & navigation
-            HStack(spacing: 12) {
-                if !viewModel.navigationHistory.isEmpty {
-                    Button {
-                        viewModel.navigateBack()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                            Text("Back")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                
-                Text("\(viewModel.filteredItems.count) items")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                if !viewModel.isNASSection {
-                    let uncommitted = viewModel.filteredItems.filter { $0.syncStatus == .uncommitted }.count
-                    let committed = viewModel.filteredItems.filter { $0.syncStatus == .committed }.count
-                    
-                    HStack(spacing: 12) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text("\(committed) committed")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                            Text("\(uncommitted) uncommitted")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.red)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
-            
-            Divider()
-            
             if viewModel.isLoading {
                 Spacer()
                 VStack(spacing: 12) {
@@ -283,24 +233,23 @@ public struct FileListView: View {
         }
     }
     
-    private func fileIcon(for path: String, isDirectory: Bool) -> Image {
+    @ViewBuilder
+    private func fileIcon(for path: String, isDirectory: Bool) -> some View {
         if isDirectory {
-            return Image(systemName: "folder.fill")
-        }
-        let ext = (path as NSString).pathExtension.lowercased()
-        switch ext {
-        case "jpg", "jpeg", "png", "heic", "gif", "webp":
-            return Image(systemName: "photo.fill")
-        case "mov", "mp4", "m4v":
-            return Image(systemName: "film.fill")
-        case "pdf":
-            return Image(systemName: "doc.richtext.fill")
-        case "zip", "tar", "gz":
-            return Image(systemName: "doc.zipper")
-        case "dmg":
-            return Image(systemName: "opticaldiscdrive.fill")
-        default:
-            return Image(systemName: "doc.fill")
+            Image(nsImage: NSWorkspace.shared.icon(for: .folder))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        } else {
+            let ext = (path as NSString).pathExtension.lowercased()
+            if !ext.isEmpty, let utType = UTType(filenameExtension: ext) {
+                Image(nsImage: NSWorkspace.shared.icon(for: utType))
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(nsImage: NSWorkspace.shared.icon(for: .data))
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            }
         }
     }
 }

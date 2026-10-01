@@ -119,20 +119,22 @@ public final class NASClient {
         let foundUrl: String? = await withTaskGroup(of: String?.self) { group in
             for candidate in uniqueCandidates {
                 group.addTask {
-                    guard let url = URL(string: "\(candidate)/health") else { return nil }
-                    var req = URLRequest(url: url)
-                    req.timeoutInterval = 2.0
-                    req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-                    do {
-                        let (data, response) = try await session.data(for: req)
-                        if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                               json["status"] as? String == "ok" {
-                                return candidate
+                    for path in ["/api/health", "/health"] {
+                        guard let url = URL(string: "\(candidate)\(path)") else { continue }
+                        var req = URLRequest(url: url)
+                        req.timeoutInterval = 2.0
+                        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+                        do {
+                            let (data, response) = try await session.data(for: req)
+                            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                   json["status"] as? String == "ok" {
+                                    return candidate
+                                }
                             }
+                        } catch {
+                            // Candidate offline or connection failed
                         }
-                    } catch {
-                        // Candidate offline or connection failed
                     }
                     return nil
                 }
