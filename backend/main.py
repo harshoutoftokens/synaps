@@ -43,10 +43,8 @@ async def lifespan(app: FastAPI):
     os.makedirs(TRASH_DIR, exist_ok=True)
     os.makedirs(IMPORT_SOURCE_DIR, exist_ok=True)
 
-    # Run scan in background thread to not block startup
-    scan_thread = threading.Thread(target=run_initial_scan, daemon=True)
-    scan_thread.start()
-
+    # Note: Automated startup scan disabled in v2 to prevent legacy GC on canonical vault
+    # Background scans can be triggered via POST /api/scan if needed
     yield
 
 
@@ -74,6 +72,7 @@ from routers.search import router as search_router
 from routers.trash import router as trash_router
 from routers.settings import router as settings_router
 from routers.imports import router as imports_router
+from routers.ingest_v2 import router as ingest_v2_router
 
 app.include_router(media_router)
 app.include_router(finder_router)
@@ -82,10 +81,11 @@ app.include_router(search_router)
 app.include_router(trash_router)
 app.include_router(settings_router)
 app.include_router(imports_router)
+app.include_router(ingest_v2_router)
 
 
-@app.get("/health")
 @app.get("/api/health")
+@app.get("/health")
 def health():
     return {"status": "ok", "app": "Synaps", "version": "1.0.0"}
 
