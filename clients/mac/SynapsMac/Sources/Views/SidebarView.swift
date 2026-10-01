@@ -8,33 +8,47 @@ public struct SidebarView: View {
             // Devices Section
             Section("Devices") {
                 if let phone = viewModel.phoneManager.connectedDevice {
+                    let isSelected = viewModel.isPicturesSection
                     Button {
                         viewModel.selectPicturesSection()
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 10) {
                             Image(systemName: "iphone.gen3")
-                                .foregroundColor(.accentColor)
+                                .font(.system(size: 15))
+                                .foregroundColor(isSelected ? .accentColor : .secondary)
+                                .frame(width: 20, alignment: .center)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(phone.name)
-                                    .fontWeight(.medium)
+                                    .fontWeight(isSelected ? .semibold : .medium)
+                                    .foregroundColor(isSelected ? .accentColor : .primary)
                                 Text("\(phone.totalItems) items • \(phone.transportType)")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
                             Spacer()
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    )
                 } else {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         Image(systemName: "cable.connector")
+                            .font(.system(size: 15))
                             .foregroundColor(.secondary)
+                            .frame(width: 20, alignment: .center)
                         Text("Connect iPhone via USB-C")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                        Spacer()
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 6)
                 }
             }
             
@@ -43,16 +57,14 @@ public struct SidebarView: View {
                 folderRow(
                     id: "folder_downloads",
                     title: "Downloads",
-                    icon: "arrow.down.circle.fill",
-                    color: .blue,
+                    icon: "arrow.down.circle",
                     path: FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.path
                 )
                 
                 folderRow(
                     id: "folder_documents",
                     title: "Documents",
-                    icon: "doc.fill",
-                    color: .orange,
+                    icon: "doc",
                     path: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.path
                 )
                 
@@ -60,46 +72,34 @@ public struct SidebarView: View {
                     id: "folder_desktop",
                     title: "Desktop",
                     icon: "menubar.dock.rectangle",
-                    color: .purple,
                     path: FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path
                 )
                 
-                Button {
-                    viewModel.selectPicturesSection()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .foregroundColor(.pink)
-                        Text("Pictures")
-                            .foregroundColor(.primary)
-                        Spacer()
-                        if let phone = viewModel.phoneManager.connectedDevice, !viewModel.phoneManager.isDeviceLocked {
-                            Text("\(phone.totalItems)")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 4)
+                picturesRow
             }
             
             // iPhone Albums (if any detected)
             if !viewModel.phoneManager.detectedAlbums.isEmpty {
                 Section("iPhone Albums") {
                     ForEach(viewModel.phoneManager.detectedAlbums, id: \.self) { album in
-                        HStack {
-                            Image(systemName: "rectangle.stack.fill")
-                                .foregroundColor(.teal)
+                        HStack(spacing: 10) {
+                            Image(systemName: "rectangle.stack")
+                                .font(.system(size: 15))
+                                .foregroundColor(.secondary)
+                                .frame(width: 20, alignment: .center)
                             Text(album)
+                                .foregroundColor(.primary)
                             Spacer()
                         }
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 6)
                     }
                 }
             }
             
             // NAS Status Section
             Section("NAS Network") {
+                let isSelected = viewModel.selectedSidebarItem?.id == "section_nas"
                 HStack(spacing: 8) {
                     Button {
                         let item = SidebarItem(
@@ -113,16 +113,22 @@ public struct SidebarView: View {
                         )
                         viewModel.selectSidebarItem(item)
                     } label: {
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(viewModel.nasOnline ? Color.green : Color.red)
-                                .frame(width: 8, height: 8)
+                        HStack(spacing: 10) {
+                            Image(systemName: "server.rack")
+                                .font(.system(size: 15))
+                                .foregroundColor(isSelected ? .accentColor : .secondary)
+                                .frame(width: 20, alignment: .center)
                             
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(viewModel.nasOnline ? "Home Cloud (homecloud1)" : "Home Cloud (Offline)")
-                                    .font(.subheadline)
-                                    .fontWeight(viewModel.selectedSidebarItem?.id == "section_nas" ? .bold : .medium)
-                                    .foregroundColor(viewModel.selectedSidebarItem?.id == "section_nas" ? .accentColor : .primary)
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(viewModel.nasOnline ? Color.green : Color.red)
+                                        .frame(width: 6, height: 6)
+                                    Text(viewModel.nasOnline ? "Home Cloud (homecloud1)" : "Home Cloud (Offline)")
+                                        .font(.subheadline)
+                                        .fontWeight(isSelected ? .bold : .medium)
+                                        .foregroundColor(isSelected ? .accentColor : .primary)
+                                }
                                 Text(viewModel.nasBaseUrl)
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
@@ -130,8 +136,15 @@ public struct SidebarView: View {
                             
                             Spacer()
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    )
                     
                     Button {
                         Task {
@@ -155,8 +168,40 @@ public struct SidebarView: View {
         .frame(minWidth: 220)
     }
     
-    private func folderRow(id: String, title: String, icon: String, color: Color, path: String?) -> some View {
-        Button {
+    private var picturesRow: some View {
+        let isSelected = viewModel.isPicturesSection
+        return Button {
+            viewModel.selectPicturesSection()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 15))
+                    .foregroundColor(isSelected ? .accentColor : .secondary)
+                    .frame(width: 20, alignment: .center)
+                Text("Pictures")
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(isSelected ? .accentColor : .primary)
+                Spacer()
+                if let phone = viewModel.phoneManager.connectedDevice, !viewModel.phoneManager.isDeviceLocked {
+                    Text("\(phone.totalItems)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
+    }
+    
+    private func folderRow(id: String, title: String, icon: String, path: String?) -> some View {
+        let isSelected = viewModel.selectedSidebarItem?.id == id
+        return Button {
             guard let path = path else { return }
             let item = SidebarItem(
                 id: id,
@@ -168,16 +213,25 @@ public struct SidebarView: View {
             )
             viewModel.selectSidebarItem(item)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .foregroundColor(color)
+                    .font(.system(size: 15))
+                    .foregroundColor(isSelected ? .accentColor : .secondary)
+                    .frame(width: 20, alignment: .center)
                 Text(title)
-                    .foregroundColor(.primary)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(isSelected ? .accentColor : .primary)
                 Spacer()
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
     }
 }
 
