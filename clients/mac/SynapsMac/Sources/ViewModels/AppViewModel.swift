@@ -475,6 +475,9 @@ public final class AppViewModel: ObservableObject {
         Task {
             await phoneManager.importItems(filenames: filenames)
             self.selectedItemIds.removeAll()
+            if self.isPicturesSection {
+                self.fileItems = self.phoneManager.phoneMediaItems
+            }
         }
     }
     
@@ -483,6 +486,9 @@ public final class AppViewModel: ObservableObject {
         Task {
             await phoneManager.importItems(filenames: filenames)
             self.selectedItemIds.removeAll()
+            if self.isPicturesSection {
+                self.fileItems = self.phoneManager.phoneMediaItems
+            }
         }
     }
     
@@ -711,6 +717,10 @@ public final class AppViewModel: ObservableObject {
     
     public func syncAllUncommitted() {
         guard !isSyncing else { return }
+        if isPicturesSection {
+            importAllItems()
+            return
+        }
         guard nasOnline else {
             syncStatusMessage = "Cannot sync: NAS is offline"
             return
@@ -726,6 +736,16 @@ public final class AppViewModel: ObservableObject {
     }
     
     public func syncItem(_ item: SynapsFileItem) {
+        if isPicturesSection || item.originalPath.hasPrefix("iPhone://") {
+            Task {
+                await phoneManager.importItems(filenames: [item.filename])
+                if self.isPicturesSection {
+                    self.fileItems = self.phoneManager.phoneMediaItems
+                }
+            }
+            return
+        }
+        
         if item.isDirectory {
             if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
                 fileItems[idx].syncStatus = .syncing
@@ -750,6 +770,10 @@ public final class AppViewModel: ObservableObject {
     
     public func syncSelectedItems() {
         guard !isSyncing else { return }
+        if isPicturesSection {
+            importSelectedItems()
+            return
+        }
         guard nasOnline else {
             syncStatusMessage = "Cannot sync: NAS is offline"
             return
@@ -846,7 +870,7 @@ public final class AppViewModel: ObservableObject {
                 do {
                     let precheckResp = try await nasClient.batchPreCheck(
                         sourceId: itemsWithSha.first?.sourceId ?? "mac_harsh",
-                        friendlyName: "MacBook",
+                        friendlyName: "Harsh's Mac",
                         platform: "macOS",
                         items: itemsWithSha
                     )

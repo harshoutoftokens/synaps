@@ -65,7 +65,11 @@ public struct PhotosGridView: View {
                                     },
                                     onDoubleClick: {
                                         viewModel.toggleSelection(id: item.id)
-                                    }
+                                    },
+                                    onSync: {
+                                        viewModel.syncItem(item)
+                                    },
+                                    selectedCount: viewModel.selectedItemIds.count
                                 )
                             }
                         }
@@ -519,8 +523,25 @@ public struct PhotoThumbnailCell: View {
                     .frame(width: size, height: size)
                 }
                 
-                // Git-for-Files Badge (Bottom Right)
-                if !isPicturesSection && !isNASSection {
+                // Imported to Mac Checkmark Badge (Bottom Right for Pictures Section)
+                if isPicturesSection {
+                    let localImported = iPhoneManager.shared.importDirectoryURL.appendingPathComponent(item.filename).path
+                    if item.syncStatus == .committed || FileManager.default.fileExists(atPath: localImported) {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                    .font(.system(size: max(14, size * 0.14)))
+                                    .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+                                    .padding(6)
+                            }
+                        }
+                        .frame(width: size, height: size)
+                    }
+                } else if !isNASSection {
+                    // Git-for-Files Badge (Bottom Right)
                     FileBadgeView(status: item.syncStatus, size: max(16, size * 0.16))
                         .padding(6)
                 }
@@ -557,6 +578,18 @@ public struct PhotoThumbnailCell: View {
                 Button(isSelected ? "Deselect" : "Select") {
                     onToggleSelect?()
                 }
+                Button(selectedCount > 1 ? "Import Selected (\(selectedCount)) to Mac" : "Import to Mac") {
+                    onSync?()
+                }
+                let localImported = iPhoneManager.shared.importDirectoryURL.appendingPathComponent(item.filename).path
+                if FileManager.default.fileExists(atPath: localImported) {
+                    Button("Quick Look (Imported)") {
+                        QuickLookCoordinator.shared.toggleQuickLook(for: [URL(fileURLWithPath: localImported)])
+                    }
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.selectFile(localImported, inFileViewerRootedAtPath: "")
+                    }
+                }
             }
             if !item.isDirectory && FileManager.default.fileExists(atPath: item.originalPath) {
                 Button("Quick Look") {
@@ -580,7 +613,7 @@ public struct PhotoThumbnailCell: View {
                         onDownload?()
                     }
                 }
-            } else {
+            } else if !isPicturesSection {
                 if item.syncStatus != .committed && FileManager.default.fileExists(atPath: item.originalPath) {
                     Button(selectedCount > 1 ? "Sync Selected (\(selectedCount)) to NAS" : "Sync to NAS") {
                         onSync?()
@@ -593,10 +626,10 @@ public struct PhotoThumbnailCell: View {
     private func loadThumbnail() {
         guard nsImage == nil else { return }
         if item.originalPath.hasPrefix("iPhone://") {
-            if let cached = iPhoneManager.shared.getThumbnail(for: item.filename) {
-                self.nsImage = cached
-            } else {
-                iPhoneManager.shared.requestThumbnail(for: item.filename)
+            iPhoneManager.shared.loadThumbnail(for: item.filename) { image in
+                if let image = image {
+                    self.nsImage = image
+                }
             }
         } else if item.originalPath.hasPrefix("nas://") {
             return

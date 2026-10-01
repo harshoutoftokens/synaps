@@ -45,6 +45,10 @@ cat << 'EOF' > "$APP_BUNDLE/Contents/Info.plist"
     <string>NSApplication</string>
     <key>NSCameraUsageDescription</key>
     <string>Synaps accesses connected iOS devices to ingest media.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Synaps requires access to photos to display and import media from your connected devices.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Synaps requires permission to save imported photos to your Mac.</string>
     <key>NSDesktopFolderUsageDescription</key>
     <string>Synaps requires access to your Desktop folder to index and synchronize your files.</string>
     <key>NSDocumentsFolderUsageDescription</key>

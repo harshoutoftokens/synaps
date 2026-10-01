@@ -5,9 +5,37 @@ public struct SyncStatusBar: View {
     
     public var body: some View {
         HStack(spacing: 16) {
-            // Status and Uncommitted Summary
+            // Status and Summary
             HStack(spacing: 8) {
-                if viewModel.isNASSection {
+                if viewModel.isPicturesSection {
+                    if viewModel.phoneManager.isImporting {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .frame(width: 16, height: 16)
+                        Text(viewModel.phoneManager.importStatusMessage)
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                    } else if viewModel.phoneManager.connectedDevice == nil {
+                        Image(systemName: "iphone.slash")
+                            .foregroundColor(.secondary)
+                        Text("No iPhone connected")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if viewModel.phoneManager.isDeviceLocked {
+                        Image(systemName: "lock.shield")
+                            .foregroundColor(.orange)
+                        Text("iPhone is Locked — Please unlock & trust")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } else {
+                        Image(systemName: "iphone")
+                            .foregroundColor(.accentColor)
+                        Text("\(viewModel.phoneManager.connectedDevice?.name ?? "iPhone") • \(viewModel.phoneManager.phoneMediaItems.count) media items")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                    }
+                } else if viewModel.isNASSection {
                     Image(systemName: "server.rack")
                         .foregroundColor(.accentColor)
                     Text("\(viewModel.fileItems.count) items on Home Cloud")
@@ -53,8 +81,12 @@ public struct SyncStatusBar: View {
             .foregroundColor(.secondary)
             .help("View NAS sync and discovery activity log")
             
-            // Sync progress bar & speed gauge
-            if viewModel.isSyncing {
+            // Progress bar & speed gauge
+            if viewModel.isPicturesSection && viewModel.phoneManager.isImporting {
+                ProgressView(value: viewModel.phoneManager.importProgress)
+                    .progressViewStyle(.linear)
+                    .frame(width: 140)
+            } else if viewModel.isSyncing {
                 HStack(spacing: 8) {
                     ProgressView(value: viewModel.syncProgress)
                         .progressViewStyle(.linear)
@@ -68,7 +100,37 @@ public struct SyncStatusBar: View {
                 }
             }
             
-            if !viewModel.isNASSection {
+            if viewModel.isPicturesSection {
+                // iPhone Import Action Buttons
+                if !viewModel.selectedItemIds.isEmpty {
+                    Button {
+                        viewModel.importSelectedItems()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.down")
+                            Text("Import Selected (\(viewModel.selectedItemIds.count))")
+                                .fontWeight(.semibold)
+                        }
+                        .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.accentColor)
+                    .disabled(viewModel.phoneManager.isImporting)
+                }
+                
+                Button {
+                    viewModel.importAllItems()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text("Import All")
+                            .fontWeight(.semibold)
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.phoneManager.isImporting || viewModel.filteredItems.isEmpty)
+            } else if !viewModel.isNASSection {
                 // Sync Selected Action Button
                 if !viewModel.selectedItemIds.isEmpty {
                     Button {
