@@ -87,7 +87,7 @@ public final class LocalFileScanner {
                     
                     // Fast cache check: sub-millisecond lookup
                     if let cached = self.cacheStore.getRecord(for: path) {
-                        if cached.size == size && abs(cached.mtime - mtime.timeIntervalSince1970) < 0.05 {
+                        if cached.size == size && abs(cached.mtime - mtime.timeIntervalSince1970) < 1.0 {
                             fileSHA = cached.sha256
                             if cached.lastSyncedAt != nil || cached.syncStatus == SyncStatus.committed.rawValue {
                                 syncStatus = .committed
@@ -219,7 +219,7 @@ public final class LocalFileScanner {
             var album: String? = nil
             
             if let cached = self.cacheStore.getRecord(for: path) {
-                if cached.size == size && abs(cached.mtime - mtime.timeIntervalSince1970) < 0.05 {
+                if cached.size == size && abs(cached.mtime - mtime.timeIntervalSince1970) < 1.0 {
                     fileSHA = cached.sha256
                     if cached.lastSyncedAt != nil || cached.syncStatus == SyncStatus.committed.rawValue {
                         syncStatus = .committed
@@ -283,9 +283,9 @@ public final class LocalFileScanner {
             let mtime = rv.contentModificationDate ?? Date()
             
             guard let record = self.cacheStore.getRecord(for: p),
-                  record.syncStatus == SyncStatus.committed.rawValue,
+                  (record.syncStatus == SyncStatus.committed.rawValue || record.lastSyncedAt != nil),
                   record.size == size,
-                  abs(record.mtime - mtime.timeIntervalSince1970) < 0.05 else {
+                  abs(record.mtime - mtime.timeIntervalSince1970) < 1.0 else {
                 return .uncommitted
             }
         }

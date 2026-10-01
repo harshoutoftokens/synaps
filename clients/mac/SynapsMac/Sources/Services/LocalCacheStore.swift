@@ -21,6 +21,7 @@ public final class LocalCacheStore {
     private init() {
         openDatabase()
         createTables()
+        migrateSchema()
     }
     
     deinit {
@@ -54,6 +55,7 @@ public final class LocalCacheStore {
         );
         CREATE INDEX IF NOT EXISTS ix_mtime ON local_files (mtime);
         CREATE INDEX IF NOT EXISTS ix_sha256 ON local_files (sha256);
+        CREATE INDEX IF NOT EXISTS ix_sync_status ON local_files (sync_status);
         CREATE TABLE IF NOT EXISTS sync_activity_log (
             id TEXT PRIMARY KEY,
             timestamp REAL NOT NULL,
@@ -76,14 +78,62 @@ public final class LocalCacheStore {
         }
     }
     
-    public func getRecord(for path: String) -> CachedRecord? {
-        return queue.sync {
-            let sql = "SELECT path, inode, size, mtime, sha256, last_synced_at, sync_status, album, is_favorite FROM local_files WHERE path = ? LIMIT 1;"
+    private func migrateSchema() {
+        queue.sync {
+            var existingColumns = Set<String>()
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+            if sqlite3_prepare_v2(db, "PRAGMA table_info(local_files);", -1, &stmt, nil) == SQLITE_OK {
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    if let colName = sqlite3_column_text(stmt, 1) {
+                        existingColumns.insert(String(cString: colName).lowercased())
+                    }
+                }
+                sqlite3_finalize(stmt)
+            } else if let err = sqlite3_errmsg(db) {
+                print("❌ SQLite PRAGMA table_info error: \(String(cString: err))")
+            }
+            
+            let migrations: [(col: String, alterSql: String)] = [
+                ("sync_status", "ALTER TABLE local_files ADD COLUMN sync_status TEXT DEFAULT 'uncommitted';"),
+                ("album", "ALTER TABLE local_files ADD COLUMN album TEXT;"),
+                ("is_favorite", "ALTER TABLE local_files ADD COLUMN is_favorite INTEGER DEFAULT 0;")
+            ]
+            
+            for migration in migrations {
+                if !existingColumns.contains(migration.col) {
+                    var errMsg: UnsafeMutablePointer<CChar>?
+                    if sqlite3_exec(db, migration.alterSql, nil, nil, &errMsg) == SQLITE_OK {
+                        print("✅ Added missing column \(migration.col) to local_files")
+                    } else if let err = errMsg {
+                        print("❌ Migration error adding \(migration.col): \(String(cString: err))")
+                        sqlite3_free(err)
+                    }
+                }
+            }
+            
+            _ = sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS ix_sync_status ON local_files (sync_status);", nil, nil, nil)
+        }
+    }
+    
+    public static func normalizePath(_ path: String) -> String {
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().standardized.path
+    }
+    
+    public func getRecord(for path: String) -> CachedRecord? {
+        let norm = Self.normalizePath(path)
+        return queue.sync {
+            let sql = "SELECT path, inode, size, mtime, sha256, last_synced_at, sync_status, album, is_favorite FROM local_files WHERE path = ? OR path = ? LIMIT 1;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                if let err = sqlite3_errmsg(db) {
+                    print("❌ SQLite getRecord prepare error for \(path): \(String(cString: err))")
+                }
+                return nil
+            }
             defer { sqlite3_finalize(stmt) }
             
-            sqlite3_bind_text(stmt, 1, (path as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 1, (norm as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (path as NSString).utf8String, -1, nil)
             
             if sqlite3_step(stmt) == SQLITE_ROW {
                 let p = String(cString: sqlite3_column_text(stmt, 0))
@@ -113,6 +163,7 @@ public final class LocalCacheStore {
     }
     
     public func saveRecord(_ record: CachedRecord) {
+        let norm = Self.normalizePath(record.path)
         queue.sync {
             let sql = """
             INSERT INTO local_files (path, inode, size, mtime, sha256, last_synced_at, sync_status, album, is_favorite)
@@ -131,10 +182,15 @@ public final class LocalCacheStore {
                 is_favorite = excluded.is_favorite;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                if let err = sqlite3_errmsg(db) {
+                    print("❌ SQLite saveRecord prepare error for \(record.path): \(String(cString: err))")
+                }
+                return
+            }
             defer { sqlite3_finalize(stmt) }
             
-            sqlite3_bind_text(stmt, 1, (record.path as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 1, (norm as NSString).utf8String, -1, nil)
             sqlite3_bind_int64(stmt, 2, record.inode)
             sqlite3_bind_int64(stmt, 3, record.size)
             sqlite3_bind_double(stmt, 4, record.mtime)
@@ -161,30 +217,57 @@ public final class LocalCacheStore {
             
             sqlite3_bind_int(stmt, 9, record.isFavorite ? 1 : 0)
             
-            sqlite3_step(stmt)
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                if let err = sqlite3_errmsg(db) {
+                    print("❌ SQLite saveRecord step error for \(record.path): \(String(cString: err))")
+                }
+            }
         }
     }
     
     public func markSynced(paths: [String], status: SyncStatus = .committed) {
         let now = Date().timeIntervalSince1970
+        let fileManager = FileManager.default
         queue.sync {
             let sql = """
-            INSERT INTO local_files (path, sync_status, last_synced_at)
-            VALUES (?, ?, ?)
+            INSERT INTO local_files (path, inode, size, mtime, sha256, last_synced_at, sync_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(path) DO UPDATE SET
                 sync_status = excluded.sync_status,
-                last_synced_at = excluded.last_synced_at;
+                last_synced_at = excluded.last_synced_at,
+                size = CASE WHEN excluded.size > 0 THEN excluded.size ELSE local_files.size END,
+                mtime = CASE WHEN excluded.mtime > 0 THEN excluded.mtime ELSE local_files.mtime END,
+                inode = CASE WHEN excluded.inode > 0 THEN excluded.inode ELSE local_files.inode END;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                if let err = sqlite3_errmsg(db) {
+                    print("❌ SQLite markSynced prepare error: \(String(cString: err))")
+                }
+                return
+            }
             defer { sqlite3_finalize(stmt) }
             
             for path in paths {
+                let norm = Self.normalizePath(path)
+                let stat = (try? fileManager.attributesOfItem(atPath: norm)) ?? (try? fileManager.attributesOfItem(atPath: path))
+                let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
+                let size = (stat?[.size] as? NSNumber)?.int64Value ?? 0
+                let mtime = (stat?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                
                 sqlite3_reset(stmt)
-                sqlite3_bind_text(stmt, 1, (path as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 2, (status.rawValue as NSString).utf8String, -1, nil)
-                sqlite3_bind_double(stmt, 3, now)
-                sqlite3_step(stmt)
+                sqlite3_bind_text(stmt, 1, (norm as NSString).utf8String, -1, nil)
+                sqlite3_bind_int64(stmt, 2, inode)
+                sqlite3_bind_int64(stmt, 3, size)
+                sqlite3_bind_double(stmt, 4, mtime)
+                sqlite3_bind_null(stmt, 5)
+                sqlite3_bind_double(stmt, 6, now)
+                sqlite3_bind_text(stmt, 7, (status.rawValue as NSString).utf8String, -1, nil)
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    if let err = sqlite3_errmsg(db) {
+                        print("❌ SQLite markSynced step error for \(path): \(String(cString: err))")
+                    }
+                }
             }
         }
     }
@@ -197,13 +280,14 @@ public final class LocalCacheStore {
         album: String? = nil,
         isFavorite: Bool = false
     ) {
+        let norm = Self.normalizePath(path)
         let fileManager = FileManager.default
-        let stat = try? fileManager.attributesOfItem(atPath: path)
+        let stat = (try? fileManager.attributesOfItem(atPath: norm)) ?? (try? fileManager.attributesOfItem(atPath: path))
         let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
         let now = Date().timeIntervalSince1970
         
         saveRecord(CachedRecord(
-            path: path,
+            path: norm,
             inode: inode,
             size: fileSize,
             mtime: modifiedAt.timeIntervalSince1970,
