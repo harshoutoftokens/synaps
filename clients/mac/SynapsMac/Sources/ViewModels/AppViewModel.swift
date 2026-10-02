@@ -599,10 +599,10 @@ public final class AppViewModel: ObservableObject {
             }
             
             do {
-                let resp = try await self.nasClient.browseDirectory(path: path)
+                let firstPage = try await self.nasClient.browseDirectory(path: path, page: 1, perPage: 1000)
                 var items: [SynapsFileItem] = []
                 
-                for folder in resp.folders {
+                for folder in firstPage.folders {
                     let date = Self.parseDate(folder.modified) ?? Date()
                     let item = SynapsFileItem(
                         id: "nas://" + folder.path,
@@ -623,7 +623,16 @@ public final class AppViewModel: ObservableObject {
                     items.append(item)
                 }
                 
-                for file in resp.files {
+                // If directory has more than 1,000 files, fetch all pages so full-folder sorting works seamlessly
+                var allRemoteFiles = firstPage.files
+                if firstPage.total_files > firstPage.files.count {
+                    let fullFiles = try await self.nasClient.browseAllDirectoryFiles(path: path)
+                    if !fullFiles.isEmpty {
+                        allRemoteFiles = fullFiles
+                    }
+                }
+                
+                for file in allRemoteFiles {
                     let date = Self.parseDate(file.modified) ?? Date()
                     let ext = (file.name as NSString).pathExtension.lowercased()
                     let item = SynapsFileItem(
@@ -648,7 +657,7 @@ public final class AppViewModel: ObservableObject {
                 await MainActor.run {
                     self.fileItems = items
                     self.isLoading = false
-                    self.syncStatusMessage = "Home Cloud: \(resp.total_folders) folders, \(resp.total_files) files"
+                    self.syncStatusMessage = "Home Cloud: \(firstPage.total_folders) folders, \(allRemoteFiles.count) files"
                 }
             } catch {
                 await MainActor.run {
