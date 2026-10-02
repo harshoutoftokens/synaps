@@ -61,12 +61,12 @@ def generate_video_thumbnail(source_path: str, thumb_path: str) -> bool:
     """Generate a thumbnail for a video using ffmpeg.
     Extracts a single frame at 0.5s with -threads 1 to preserve CPU responsiveness."""
     try:
-        # Fast input seek with single thread (so the 2nd core remains 100% free for API browsing)
+        # Fast input seek at 0.1s (grabs first keyframe immediately without decoding prior frames)
         result = subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-threads", "1",
-                "-ss", "0.5",
+                "-ss", "0.1",
                 "-noaccurate_seek",
                 "-i", source_path,
                 "-vframes", "1",
@@ -76,7 +76,7 @@ def generate_video_thumbnail(source_path: str, thumb_path: str) -> bool:
                 thumb_path
             ],
             capture_output=True,
-            timeout=10,
+            timeout=25,
         )
 
         if result.returncode == 0 and os.path.exists(thumb_path):
@@ -95,7 +95,7 @@ def generate_video_thumbnail(source_path: str, thumb_path: str) -> bool:
                 thumb_path
             ],
             capture_output=True,
-            timeout=10,
+            timeout=25,
         )
         return result.returncode == 0 and os.path.exists(thumb_path)
 
