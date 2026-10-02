@@ -324,11 +324,6 @@ public final class AppViewModel: ObservableObject {
         }
         
         items.sort { a, b in
-            // Folders always stay at top when not sorting strictly by kind
-            if a.isDirectory != b.isDirectory && sortField != .kind {
-                return a.isDirectory
-            }
-            
             let comparison: ComparisonResult
             switch sortField {
             case .name:
