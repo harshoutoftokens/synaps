@@ -915,9 +915,11 @@ public final class AppViewModel: ObservableObject {
                 }
             }
             
+            let dedupCount = uploadedCount
             // Step 2: Upload remaining files
             for (index, item) in itemsPendingUpload.enumerated() {
-                self.syncStatusMessage = "[\(uploadedCount + index + 1)/\(total)] Syncing \(item.filename)..."
+                let currentItemNumber = min(dedupCount + index + 1, total)
+                self.syncStatusMessage = "[\(currentItemNumber)/\(total)] Syncing \(item.filename)..."
                 
                 if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
                     fileItems[idx].syncStatus = .syncing
