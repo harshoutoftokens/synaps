@@ -80,3 +80,17 @@ Icon
 ._*
 .Spotlight-V100
 .Trashes
+
+# 9. Swift, Xcode & macOS Client Builds
+.build/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspacedata
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.app/
+checkpoints/
+
