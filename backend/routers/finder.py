@@ -11,7 +11,11 @@ import logging
 from datetime import datetime
 
 from config import STORAGE_PATH, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+<<<<<<< HEAD
+from thumbnails import get_thumbnail_path, enqueue_thumbnail, generate_image_thumbnail, generate_video_thumbnail
+=======
 from thumbnails import get_thumbnail_path, enqueue_thumbnail, generate_image_thumbnail
+>>>>>>> origin/main
 
 logger = logging.getLogger("synaps.finder")
 
@@ -206,23 +210,22 @@ def get_file_thumbnail(path: str = Query(..., description="Relative path from st
     except Exception as db_err:
         logger.debug(f"Database lookup failed: {db_err}")
 
-    # 4. Enqueue for generation in background LIFO queue
+    # 4. Media extensions check
     ext = os.path.splitext(full_path)[1].lower()
-    if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:
-        enqueue_thumbnail(full_path)
-        # Small image fast path: generate synchronously only for small images under 2.5MB
-        if ext in (".jpg", ".jpeg", ".png", ".webp") and os.path.getsize(full_path) < 2500000:
-            try:
-                if generate_image_thumbnail(full_path, thumb_path):
-                    return FileResponse(
-                        thumb_path,
-                        media_type="image/webp",
-                        headers={"Cache-Control": "public, max-age=604800, immutable"}
-                    )
-            except Exception as e:
-                logger.debug(f"Sync thumbnail gen failed: {e}")
+    media_exts = ALL_EXTENSIONS | {".heic", ".heif", ".mov", ".mp4", ".m4v", ".jpg", ".jpeg", ".png", ".webp", ".pdf"}
+    if ext not in media_exts:
+        raise HTTPException(status_code=404, detail="File type does not support thumbnails")
 
-    raise HTTPException(status_code=202, detail="Thumbnail queued for generation")
+    # 5. Non-blocking background enqueue: return 202 Accepted immediately
+    # Never transcode heavy 4K videos or 48MP HEICs synchronously in HTTP request workers!
+    enqueue_thumbnail(full_path)
+    from fastapi.responses import Response
+    return Response(
+        content=b'{"status":"queued"}',
+        status_code=202,
+        media_type="application/json",
+        headers={"Retry-After": "2"}
+    )
 
 
 @router.get("/tree")

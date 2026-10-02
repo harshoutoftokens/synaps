@@ -419,24 +419,32 @@ public final class NASClient {
         }
         
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 8.0
+        config.timeoutIntervalForRequest = 25.0
+        config.timeoutIntervalForResource = 35.0
         config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         let session = URLSession(configuration: config)
         
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse else {
+                throw URLError(.badServerResponse)
+            }
+            if http.statusCode == 404 {
+                return NASBrowseResponse(current_path: path, folders: [], files: [], total_folders: 0, total_files: 0, page: page, per_page: perPage)
+            }
+            guard http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
+        } catch {
+            // One-time retry after brief delay in case backend was restarting or momentarily busy
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
         }
-        
-        if http.statusCode == 404 {
-            return NASBrowseResponse(current_path: path, folders: [], files: [], total_folders: 0, total_files: 0, page: page, per_page: perPage)
-        }
-        
-        guard http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
-        
-        return try JSONDecoder().decode(NASBrowseResponse.self, from: data)
     }
     
     public func browseAllDirectoryFiles(path: String) async throws -> [NASFileItem] {

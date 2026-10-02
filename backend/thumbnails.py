@@ -40,16 +40,17 @@ def get_thumbnail_path(file_path: str) -> str:
 
 
 def generate_image_thumbnail(source_path: str, thumb_path: str) -> bool:
-    """Generate a thumbnail for an image file (JPEG, PNG, WebP, HEIC)."""
+    """Generate a thumbnail for an image file (JPEG, PNG, WebP, HEIC).
+    Optimized for Core 2 Duo: uses BILINEAR scaling and fast WebP encoding."""
     try:
         with Image.open(source_path) as img:
             # Convert RGBA/P to RGB for WebP compatibility
             if img.mode in ('RGBA', 'LA', 'P'):
                 img = img.convert('RGB')
 
-            # Use LANCZOS for high quality downscaling
-            img.thumbnail(THUMBNAIL_SIZE, Image.LANCZOS)
-            img.save(thumb_path, "WEBP", quality=THUMBNAIL_QUALITY, optimize=True)
+            # Use BILINEAR for fast, low-CPU downscaling on weak hardware
+            img.thumbnail(THUMBNAIL_SIZE, Image.BILINEAR)
+            img.save(thumb_path, "WEBP", quality=THUMBNAIL_QUALITY, method=0)
             return True
     except Exception as e:
         logger.error(f"Image thumbnail failed: {source_path}: {e}")
@@ -58,31 +59,15 @@ def generate_image_thumbnail(source_path: str, thumb_path: str) -> bool:
 
 def generate_video_thumbnail(source_path: str, thumb_path: str) -> bool:
     """Generate a thumbnail for a video using ffmpeg.
-    Extracts a single frame at 0.5s — lightweight for Core2Duo."""
+    Extracts a single frame at 0.5s with -threads 1 to preserve CPU responsiveness."""
     try:
-        # First try at 0.5s, fallback to first frame if video is very short
+        # Fast input seek at 0.1s (grabs first keyframe immediately without decoding prior frames)
         result = subprocess.run(
             [
                 "ffmpeg", "-y",
-                "-ss", "0.5",           # Seek to 0.5s
-                "-i", source_path,
-                "-vframes", "1",         # Extract exactly 1 frame
-                "-vf", f"scale={THUMBNAIL_SIZE[0]}:-1",
-                "-q:v", "5",
-                "-loglevel", "error",    # Suppress verbose output
-                thumb_path
-            ],
-            capture_output=True,
-            timeout=30,
-        )
-
-        if result.returncode == 0 and os.path.exists(thumb_path):
-            return True
-
-        # Fallback: try first frame (for very short videos)
-        result = subprocess.run(
-            [
-                "ffmpeg", "-y",
+                "-threads", "1",
+                "-ss", "0.1",
+                "-noaccurate_seek",
                 "-i", source_path,
                 "-vframes", "1",
                 "-vf", f"scale={THUMBNAIL_SIZE[0]}:-1",
@@ -91,7 +76,26 @@ def generate_video_thumbnail(source_path: str, thumb_path: str) -> bool:
                 thumb_path
             ],
             capture_output=True,
-            timeout=30,
+            timeout=25,
+        )
+
+        if result.returncode == 0 and os.path.exists(thumb_path):
+            return True
+
+        # Fallback: try first frame (for very short clips)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-threads", "1",
+                "-i", source_path,
+                "-vframes", "1",
+                "-vf", f"scale={THUMBNAIL_SIZE[0]}:-1",
+                "-q:v", "5",
+                "-loglevel", "error",
+                thumb_path
+            ],
+            capture_output=True,
+            timeout=25,
         )
         return result.returncode == 0 and os.path.exists(thumb_path)
 
@@ -147,11 +151,13 @@ import queue
 import threading
 
 # Setup background worker queue
-# Use a LIFO queue so the most recently requested thumbnails (what the user is currently looking at) are processed first
 thumbnail_queue = queue.LifoQueue()
+_enqueued_paths = set()
+_queue_lock = threading.Lock()
 
 def _thumbnail_worker():
-    """Background worker that continuously processes the thumbnail queue."""
+    """Background worker that continuously processes the thumbnail queue with strict memory control."""
+    import gc
     while True:
         try:
             item = thumbnail_queue.get()
@@ -160,7 +166,7 @@ def _thumbnail_worker():
             
             source_path, thumb_path = item
             
-            if not os.path.exists(thumb_path):
+            if not os.path.exists(thumb_path) and os.path.exists(source_path):
                 ext = os.path.splitext(source_path)[1].lower()
                 success = False
                 if ext in VIDEO_EXTENSIONS:
@@ -172,17 +178,36 @@ def _thumbnail_worker():
                 
                 if success:
                     logger.debug(f"Generated thumbnail: {os.path.basename(source_path)}")
+                    try:
+                        from database import SessionLocal
+                        from models import MediaFile
+                        from config import STORAGE_PATH
+                        with SessionLocal() as db:
+                            rel_path = os.path.relpath(source_path, STORAGE_PATH)
+                            media = db.query(MediaFile).filter(
+                                (MediaFile.path == source_path) | (MediaFile.relative_path == rel_path)
+                            ).first()
+                            if media:
+                                media.has_thumbnail = True
+                                media.thumbnail_path = thumb_path
+                                db.commit()
+                    except Exception as db_e:
+                        logger.debug(f"DB update failed: {db_e}")
+                gc.collect()
             
+            with _queue_lock:
+                _enqueued_paths.discard(source_path)
             thumbnail_queue.task_done()
         except Exception as e:
             logger.error(f"Thumbnail worker error: {e}")
-            if 'item' in locals() and hasattr(item, '__len__') and len(item) == 2:
-                thumbnail_queue.task_done()
+            if 'source_path' in locals():
+                with _queue_lock:
+                    _enqueued_paths.discard(source_path)
+            thumbnail_queue.task_done()
 
-# Start multiple worker threads (2 for Core2Duo)
-for _ in range(2):
-    worker_thread = threading.Thread(target=_thumbnail_worker, daemon=True)
-    worker_thread.start()
+# Start 1 dedicated worker thread (optimal for Core2Duo to avoid CPU & RAM thrashing)
+worker_thread = threading.Thread(target=_thumbnail_worker, daemon=True)
+worker_thread.start()
 
 def enqueue_thumbnail(source_path: str) -> str:
     """Enqueue a thumbnail for background generation and return its expected path."""
@@ -190,7 +215,10 @@ def enqueue_thumbnail(source_path: str) -> str:
     thumb_path = get_thumbnail_path(source_path)
     
     if not os.path.exists(thumb_path):
-        thumbnail_queue.put((source_path, thumb_path))
+        with _queue_lock:
+            if source_path not in _enqueued_paths:
+                _enqueued_paths.add(source_path)
+                thumbnail_queue.put((source_path, thumb_path))
         
     return thumb_path
 

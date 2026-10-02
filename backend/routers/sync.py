@@ -85,6 +85,13 @@ async def upload_file(
     db.add(sync_record)
     db.commit()
 
+    # Enqueue silent background thumbnail generation immediately
+    try:
+        from thumbnails import enqueue_thumbnail
+        enqueue_thumbnail(dest_path)
+    except Exception:
+        pass
+
     return {
         "status": "success",
         "message": "File uploaded successfully",
@@ -142,6 +149,13 @@ async def upload_batch(
             )
             db.add(sync_record)
             results.append({"filename": file.filename, "status": "success"})
+
+            # Enqueue silent background thumbnail generation immediately
+            try:
+                from thumbnails import enqueue_thumbnail
+                enqueue_thumbnail(dest_path)
+            except Exception:
+                pass
         except Exception as e:
             results.append({"filename": file.filename, "status": "error", "reason": str(e)})
 

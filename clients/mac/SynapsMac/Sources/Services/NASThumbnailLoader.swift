@@ -21,6 +21,7 @@ public final class NASThumbnailLoader {
     
     // Active tasks map for cancellation on scroll-away
     private var activeTasks: [String: URLSessionDataTask] = [:]
+    private var cancelledPaths = Set<String>()
     private let lock = NSLock()
     
     private init() {
@@ -33,8 +34,8 @@ public final class NASThumbnailLoader {
         
         let config = URLSessionConfiguration.default
         config.httpMaximumConnectionsPerHost = 3
-        config.timeoutIntervalForRequest = 8.0
-        config.timeoutIntervalForResource = 20.0
+        config.timeoutIntervalForRequest = 10.0
+        config.timeoutIntervalForResource = 25.0
         config.requestCachePolicy = .useProtocolCachePolicy
         self.session = URLSession(configuration: config)
     }
@@ -69,6 +70,10 @@ public final class NASThumbnailLoader {
         let cleanPath = relativePath.replacingOccurrences(of: "nas://", with: "")
         let key = cleanPath as NSString
         
+        lock.lock()
+        cancelledPaths.remove(cleanPath)
+        lock.unlock()
+        
         // 1. Tier 1: Check Memory Cache
         if let mem = memoryCache.object(forKey: key) {
             completion(mem)
@@ -101,6 +106,13 @@ public final class NASThumbnailLoader {
         retryCount: Int,
         completion: @escaping (NSImage?) -> Void
     ) {
+        lock.lock()
+        if cancelledPaths.contains(cleanPath) {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        
         var components = URLComponents(string: "\(baseUrl)/api/finder/thumbnail")
         components?.queryItems = [URLQueryItem(name: "path", value: cleanPath)]
         
@@ -110,7 +122,7 @@ public final class NASThumbnailLoader {
         }
         
         var request = URLRequest(url: url)
-        request.timeoutInterval = 8.0
+        request.timeoutInterval = 10.0
         
         lock.lock()
         activeTasks[cleanPath]?.cancel()
@@ -120,7 +132,12 @@ public final class NASThumbnailLoader {
             
             self.lock.lock()
             self.activeTasks.removeValue(forKey: cleanPath)
+            let isCancelled = self.cancelledPaths.contains(cleanPath)
             self.lock.unlock()
+            
+            if isCancelled || (error as? URLError)?.code == .cancelled {
+                return
+            }
             
             if let http = response as? HTTPURLResponse {
                 if http.statusCode == 200, let data = data, let img = NSImage(data: data) {
@@ -136,10 +153,17 @@ public final class NASThumbnailLoader {
                         completion(img)
                     }
                     return
-                } else if http.statusCode == 202 && retryCount < 2 {
-                    // Queued on NAS background LIFO worker; retry after 1.5 seconds
-                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                        self?.fetchFromNAS(cleanPath: cleanPath, baseUrl: baseUrl, retryCount: retryCount + 1, completion: completion)
+                } else if http.statusCode == 202 && retryCount < 12 {
+                    // Queued on NAS background worker; poll every 2.5s matching Web App behavior
+                    let delay: Double = 2.5
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
+                        guard let self = self else { return }
+                        self.lock.lock()
+                        let stillCancelled = self.cancelledPaths.contains(cleanPath)
+                        self.lock.unlock()
+                        if !stillCancelled {
+                            self.fetchFromNAS(cleanPath: cleanPath, baseUrl: baseUrl, retryCount: retryCount + 1, completion: completion)
+                        }
                     }
                     return
                 }
@@ -160,13 +184,15 @@ public final class NASThumbnailLoader {
     public func cancelLoad(for relativePath: String) {
         let cleanPath = relativePath.replacingOccurrences(of: "nas://", with: "")
         lock.lock()
+        cancelledPaths.insert(cleanPath)
         activeTasks[cleanPath]?.cancel()
         activeTasks.removeValue(forKey: cleanPath)
         lock.unlock()
     }
     
     private func diskCacheURLFor(relativePath: String) -> URL {
-        let hash = Insecure.MD5.hash(data: Data(relativePath.utf8))
+        let cleanPath = relativePath.replacingOccurrences(of: "nas://", with: "")
+        let hash = Insecure.MD5.hash(data: Data(cleanPath.utf8))
         let hex = hash.map { String(format: "%02hhx", $0) }.joined()
         return diskCacheURL.appendingPathComponent("\(hex).webp")
     }
