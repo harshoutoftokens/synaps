@@ -309,7 +309,6 @@ async def upload_file_v2(
         # Ensure existing file has thumbnail generated in background
         try:
             from thumbnails import enqueue_thumbnail
-            from storage_engine import get_storage_path
             full_canon = os.path.join(get_storage_path(), phys_obj.physical_path)
             enqueue_thumbnail(full_canon)
         except Exception:
