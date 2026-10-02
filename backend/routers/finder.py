@@ -11,7 +11,11 @@ import logging
 from datetime import datetime
 
 from config import STORAGE_PATH, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+<<<<<<< HEAD
 from thumbnails import get_thumbnail_path, enqueue_thumbnail, generate_image_thumbnail, generate_video_thumbnail
+=======
+from thumbnails import get_thumbnail_path, enqueue_thumbnail, generate_image_thumbnail
+>>>>>>> origin/main
 
 logger = logging.getLogger("synaps.finder")
 
