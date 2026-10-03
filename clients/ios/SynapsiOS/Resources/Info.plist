@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.synaps.ios.backgroundsync</string>
+		<string>com.synaps.ios.photoprocessing</string>
+	</array>
+	<key>CFBundleDisplayName</key>
+	<string>Synaps</string>
+	<key>CFBundleExecutable</key>
+	<string>SynapsiOS</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.synaps.ios</string>
+	<key>CFBundleName</key>
+	<string>Synaps</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+		<string>_synaps._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Synaps needs local network access to communicate with your Synaps NAS server over Wi-Fi.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Synaps requires permission to save photos and videos downloaded from your NAS back to your device.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Synaps accesses your photo library to display photos, indicate vault commit status with green ticks and red crosses, and sync your media with your Synaps NAS.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>
