@@ -11,11 +11,7 @@ import logging
 from datetime import datetime
 
 from config import STORAGE_PATH, ALL_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-<<<<<<< HEAD
 from thumbnails import get_thumbnail_path, enqueue_thumbnail, generate_image_thumbnail, generate_video_thumbnail
-=======
-from thumbnails import get_thumbnail_path, enqueue_thumbnail, generate_image_thumbnail
->>>>>>> origin/main
 
 logger = logging.getLogger("synaps.finder")
 
@@ -207,6 +203,38 @@ def get_file_thumbnail(path: str = Query(..., description="Relative path from st
                     media_type="image/webp",
                     headers={"Cache-Control": "public, max-age=604800, immutable"}
                 )
+
+            # 3b. Mirror to Canonical Vault resolution:
+            # If browsing Mirrors, resolve the mirror file to its underlying Vault physical object
+            # so mirrors load the pre-generated Vault thumbnail instantly (0ms)!
+            if clean_path.startswith("Mirrors/"):
+                fn = os.path.basename(clean_path)
+                parts = clean_path.split("/")
+                year = next((p for p in parts if len(p) == 4 and p.isdigit()), None)
+                month = next((p for p in parts if len(p) == 2 and p.isdigit()), None)
+
+                from sqlalchemy import text
+                query = """
+                    SELECT po.physical_path 
+                    FROM logical_items li 
+                    JOIN physical_objects po ON li.physical_object_id = po.id 
+                    WHERE li.original_filename = :fn
+                """
+                params = {"fn": fn}
+                if year and month:
+                    query += " AND po.physical_path LIKE :pattern"
+                    params["pattern"] = f"%Vault/{year}/{month}/%"
+
+                row = db.execute(text(query), params).fetchone()
+                if row and row[0]:
+                    canon_full = os.path.join(STORAGE_PATH, row[0])
+                    canon_thumb = get_thumbnail_path(canon_full)
+                    if os.path.exists(canon_thumb):
+                        return FileResponse(
+                            canon_thumb,
+                            media_type="image/webp",
+                            headers={"Cache-Control": "public, max-age=604800, immutable"}
+                        )
     except Exception as db_err:
         logger.debug(f"Database lookup failed: {db_err}")
 
