@@ -45,10 +45,22 @@ public struct SyncStatusBar: View {
                 } else if viewModel.isNASSection {
                     Image(systemName: "server.rack")
                         .foregroundColor(.accentColor)
-                    Text("\(viewModel.fileItems.count) items on Home Cloud")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
+                    
+                    HStack(spacing: 6) {
+                        Text(viewModel.currentDirectoryDisplay)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary.opacity(0.5))
+                        
+                        Text("\(viewModel.fileItems.count) items")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 } else if viewModel.isSyncing {
                     ProgressView()
                         .scaleEffect(0.7)
@@ -58,6 +70,17 @@ public struct SyncStatusBar: View {
                         .foregroundColor(.primary)
                 } else {
                     HStack(spacing: 6) {
+                        // Directory Breadcrumb
+                        Text(viewModel.currentDirectoryDisplay)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary.opacity(0.5))
+                        
                         if viewModel.uncommittedCount > 0 {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.red)
@@ -68,7 +91,7 @@ public struct SyncStatusBar: View {
                         } else {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
-                            Text("All files committed")
+                            Text("All committed")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }

@@ -33,6 +33,50 @@ public final class AppViewModel: ObservableObject {
     
     @Published public var currentNASRelativePath: String = ""
     
+    /// User-friendly breadcrumb/path for the bottom bar
+    public var currentDirectoryDisplay: String {
+        if isPicturesSection {
+            return "iPhone"
+        }
+        if isNASSection {
+            if currentNASRelativePath.isEmpty {
+                return "Home Cloud"
+            }
+            return "Home Cloud / " + currentNASRelativePath.replacingOccurrences(of: "/", with: " / ")
+        }
+        let home = NSHomeDirectory()
+        if currentFolderPath.hasPrefix(home) {
+            let rel = currentFolderPath.replacingOccurrences(of: home, with: "~")
+            return rel.replacingOccurrences(of: "/", with: " / ")
+        }
+        return currentFolderPath.isEmpty ? (selectedSidebarItem?.title ?? "Home") : currentFolderPath.replacingOccurrences(of: "/", with: " / ")
+    }
+    
+    /// Parses dates from ISO8601 strings (with or without timezone and with or without fractional seconds)
+    public static func parseDate(_ string: String?) -> Date? {
+        guard let string = string, !string.isEmpty else { return nil }
+        
+        let isoWithFraction = ISO8601DateFormatter()
+        isoWithFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = isoWithFraction.date(from: string) { return d }
+        
+        let isoStandard = ISO8601DateFormatter()
+        isoStandard.formatOptions = [.withInternetDateTime]
+        if let d = isoStandard.date(from: string) { return d }
+        
+        let isoNoTz = ISO8601DateFormatter()
+        isoNoTz.formatOptions = [.withFullDate, .withTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        if let d = isoNoTz.date(from: string) { return d }
+        
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: string) { return d }
+        }
+        return nil
+    }
+    
     public enum SortField: String, CaseIterable, Identifiable {
         case name = "Name"
         case dateModified = "Date Modified"
@@ -555,15 +599,11 @@ public final class AppViewModel: ObservableObject {
             }
             
             do {
-                let resp = try await self.nasClient.browseDirectory(path: path)
-                let dateFormatter = ISO8601DateFormatter()
-                dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                let fallbackFormatter = ISO8601DateFormatter()
-                
+                let firstPage = try await self.nasClient.browseDirectory(path: path, page: 1, perPage: 1000)
                 var items: [SynapsFileItem] = []
                 
-                for folder in resp.folders {
-                    let date = folder.modified.flatMap { dateFormatter.date(from: $0) ?? fallbackFormatter.date(from: $0) } ?? Date()
+                for folder in firstPage.folders {
+                    let date = Self.parseDate(folder.modified) ?? Date()
                     let item = SynapsFileItem(
                         id: "nas://" + folder.path,
                         originalPath: "nas://" + folder.path,
@@ -583,8 +623,17 @@ public final class AppViewModel: ObservableObject {
                     items.append(item)
                 }
                 
-                for file in resp.files {
-                    let date = file.modified.flatMap { dateFormatter.date(from: $0) ?? fallbackFormatter.date(from: $0) } ?? Date()
+                // If directory has more than 1,000 files, fetch all pages so full-folder sorting works seamlessly
+                var allRemoteFiles = firstPage.files
+                if firstPage.total_files > firstPage.files.count {
+                    let fullFiles = try await self.nasClient.browseAllDirectoryFiles(path: path)
+                    if !fullFiles.isEmpty {
+                        allRemoteFiles = fullFiles
+                    }
+                }
+                
+                for file in allRemoteFiles {
+                    let date = Self.parseDate(file.modified) ?? Date()
                     let ext = (file.name as NSString).pathExtension.lowercased()
                     let item = SynapsFileItem(
                         id: "nas://" + file.path,
@@ -605,14 +654,10 @@ public final class AppViewModel: ObservableObject {
                     items.append(item)
                 }
                 
-                items.sort {
-                    $0.filename.localizedStandardCompare($1.filename) == .orderedAscending
-                }
-                
                 await MainActor.run {
                     self.fileItems = items
                     self.isLoading = false
-                    self.syncStatusMessage = "Home Cloud: \(resp.total_folders) folders, \(resp.total_files) files"
+                    self.syncStatusMessage = "Home Cloud: \(firstPage.total_folders) folders, \(allRemoteFiles.count) files"
                 }
             } catch {
                 await MainActor.run {
