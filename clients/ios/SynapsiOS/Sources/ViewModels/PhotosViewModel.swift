@@ -33,12 +33,13 @@ public final class PhotosViewModel: ObservableObject {
     
     // Published UI States
     @Published public var filter: FilterOption = .all
-    @Published public var columnCount: Int = 3
+    @Published public var columnCount: Int = 5
     @Published public var isSelectionMode: Bool = false
     @Published public var selectedItemIds: Set<String> = []
     @Published public var selectedItemForDetail: SynapsMediaItem? = nil
     @Published public var showSettingsSheet: Bool = false
     @Published public var showActivityLogSheet: Bool = false
+    @Published public var visibleDateRangeText: String = ""
     
     // Services
     @ObservedObject private var photoLibrary = PhotoLibraryService.shared
@@ -46,12 +47,14 @@ public final class PhotosViewModel: ObservableObject {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     
     private var cancellables = Set<AnyCancellable>()
+    private var visibleItemDates: [Int: Date] = [:]
     
     public init() {
         // Forward changes from PhotoLibraryService and SyncManager
         PhotoLibraryService.shared.objectWillChange
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
+                self?.recalculateVisibleDateRange()
             }
             .store(in: &cancellables)
             
@@ -60,6 +63,66 @@ public final class PhotosViewModel: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
+    }
+    
+    public func itemDidAppear(at index: Int, date: Date) {
+        visibleItemDates[index] = date
+        recalculateVisibleDateRange()
+    }
+    
+    public func itemDidDisappear(at index: Int) {
+        visibleItemDates.removeValue(forKey: index)
+        recalculateVisibleDateRange()
+    }
+    
+    public func recalculateVisibleDateRange() {
+        let dates = Array(visibleItemDates.values)
+        if dates.isEmpty {
+            let topDates = Array(filteredItems.prefix(15).map { $0.createdAt })
+            formatDateRange(from: topDates)
+        } else {
+            formatDateRange(from: dates)
+        }
+    }
+    
+    private func formatDateRange(from dates: [Date]) {
+        guard let minDate = dates.min(), let maxDate = dates.max() else {
+            self.visibleDateRangeText = ""
+            return
+        }
+        
+        let cal = Calendar.current
+        let sameDay = cal.isDate(minDate, inSameDayAs: maxDate)
+        let sameMonth = cal.isDate(minDate, equalTo: maxDate, toGranularity: .month)
+        let sameYear = cal.isDate(minDate, equalTo: maxDate, toGranularity: .year)
+        
+        if sameDay {
+            let df = DateFormatter()
+            df.dateFormat = "d MMM yyyy"
+            self.visibleDateRangeText = df.string(from: maxDate)
+        } else if sameMonth && sameYear {
+            let d1 = cal.component(.day, from: minDate)
+            let d2 = cal.component(.day, from: maxDate)
+            let startDay = min(d1, d2)
+            let endDay = max(d1, d2)
+            let myf = DateFormatter()
+            myf.dateFormat = "MMM yyyy"
+            self.visibleDateRangeText = "\(startDay) – \(endDay) \(myf.string(from: maxDate))"
+        } else if sameYear {
+            let mf1 = DateFormatter()
+            mf1.dateFormat = "d MMM"
+            let mf2 = DateFormatter()
+            mf2.dateFormat = "d MMM yyyy"
+            let first = minDate < maxDate ? minDate : maxDate
+            let last = minDate < maxDate ? maxDate : minDate
+            self.visibleDateRangeText = "\(mf1.string(from: first)) – \(mf2.string(from: last))"
+        } else {
+            let yf = DateFormatter()
+            yf.dateFormat = "MMM yyyy"
+            let first = minDate < maxDate ? minDate : maxDate
+            let last = minDate < maxDate ? maxDate : minDate
+            self.visibleDateRangeText = "\(yf.string(from: first)) – \(yf.string(from: last))"
+        }
     }
     
     public var rawItems: [SynapsMediaItem] {

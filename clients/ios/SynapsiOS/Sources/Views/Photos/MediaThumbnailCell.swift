@@ -44,80 +44,65 @@ public struct MediaThumbnailCell: View {
                         .frame(width: size, height: size)
                         .overlay(
                             Image(systemName: item.isVideo ? "video.fill" : "photo")
-                                .foregroundColor(.secondary.opacity(0.5))
-                                .font(.system(size: size * 0.28))
+                                .foregroundColor(.secondary.opacity(0.35))
+                                .font(.system(size: size * 0.25))
                         )
                 }
             }
             
-            // Video Duration & Play Icon Overlay (Bottom-Left)
-            if item.isVideo {
-                VStack {
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 9))
-                        if let dur = item.formattedDuration {
-                            Text(dur)
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        }
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2.5)
-                    .background(
-                        Capsule()
-                            .fill(Color.black.opacity(0.6))
-                    )
-                    .padding(5)
-                    .frame(maxWidth: .infinity, alignment: .bottomLeading)
-                }
-            } else if item.isLivePhoto {
-                // Live photo icon (Top-Left)
-                VStack {
-                    HStack {
+            // Top-Left Badges: Favorite Heart or Live Photo
+            VStack {
+                HStack(spacing: 4) {
+                    if item.isLivePhoto {
                         Image(systemName: "livephoto")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundColor(.white)
-                            .padding(4)
+                            .padding(3)
                             .background(Circle().fill(Color.black.opacity(0.55)))
-                            .padding(4)
-                        Spacer()
-                    }
-                    Spacer()
-                }
-            }
-            
-            // Favorite Badge (Top-Left, below live photo if any)
-            if item.isFavorite && !item.isLivePhoto {
-                VStack {
-                    HStack {
+                    } else if item.isFavorite {
                         Image(systemName: "heart.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                             .foregroundColor(.pink)
-                            .padding(4)
+                            .padding(3)
                             .background(Circle().fill(Color.black.opacity(0.55)))
-                            .padding(4)
-                        Spacer()
                     }
                     Spacer()
                 }
+                .padding(4)
+                Spacer()
             }
             
-            // Sync Status Indicator Badge (Bottom-Right)
-            // Green tick for committed, Red cross for uncommitted, Blue for syncing
+            // Bottom Area:
+            // - Bottom-Left: Synaps Commit Status (🟢 Green Tick / 🔴 Red Cross)
+            // - Bottom-Right: Video Duration (e.g. 0:09, matching Apple Photos screenshot)
             VStack {
                 Spacer()
-                HStack {
+                HStack(alignment: .bottom) {
+                    // Synaps Vault Status Badge (Bottom-Left)
+                    MediaBadgeView(status: item.syncStatus, size: max(14, min(18, size * 0.16)))
+                    
                     Spacer()
-                    MediaBadgeView(status: item.syncStatus, size: max(16, min(22, size * 0.18)))
-                        .padding(4)
+                    
+                    // Video Duration Badge (Bottom-Right, matching Apple Photos)
+                    if item.isVideo, let dur = item.formattedDuration {
+                        Text(dur)
+                            .font(.system(size: max(10, min(12, size * 0.12)), weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .shadow(color: Color.black.opacity(0.9), radius: 2, x: 0, y: 1)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.black.opacity(0.45))
+                            )
+                    }
                 }
+                .padding(3.5)
             }
             
             // Selection Overlay & Checkmark (Top-Right)
             if isSelectionMode {
-                Color.black.opacity(isSelected ? 0.25 : 0.05)
+                Color.black.opacity(isSelected ? 0.28 : 0.05)
                 
                 VStack {
                     HStack {
@@ -125,19 +110,19 @@ public struct MediaThumbnailCell: View {
                         ZStack {
                             Circle()
                                 .fill(isSelected ? Color.blue : Color.black.opacity(0.4))
-                                .frame(width: 24, height: 24)
+                                .frame(width: max(20, min(24, size * 0.22)), height: max(20, min(24, size * 0.22)))
                             
                             if isSelected {
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 12, weight: .bold))
+                                    .font(.system(size: max(10, size * 0.11), weight: .bold))
                                     .foregroundColor(.white)
                             } else {
                                 Circle()
-                                    .stroke(Color.white.opacity(0.8), lineWidth: 1.5)
-                                    .frame(width: 22, height: 22)
+                                    .stroke(Color.white.opacity(0.85), lineWidth: 1.5)
+                                    .frame(width: max(18, min(22, size * 0.20)), height: max(18, min(22, size * 0.20)))
                             }
                         }
-                        .padding(5)
+                        .padding(4)
                     }
                     Spacer()
                 }
