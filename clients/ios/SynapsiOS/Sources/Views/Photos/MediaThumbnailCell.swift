@@ -140,6 +140,10 @@ public struct MediaThumbnailCell: View {
         .onAppear {
             loadThumbnail()
         }
+        .onChange(of: item.localIdentifier) { _ in
+            thumbnail = nil
+            loadThumbnail()
+        }
     }
     
     private func loadThumbnail() {
