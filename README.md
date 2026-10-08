@@ -9,7 +9,8 @@ Browse, organize, stream, and synchronize your photos, videos, and files with ze
 [![Version](https://img.shields.io/badge/version-v2.0-blue?style=flat-square)](VERSIONING.md)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](backend/)
 [![Next.js](https://img.shields.io/badge/frontend-Next.js_14-black?style=flat-square&logo=next.js&logoColor=white)](frontend/)
-[![macOS](https://img.shields.io/badge/client-SwiftUI_Native-FF3B30?style=flat-square&logo=apple&logoColor=white)](clients/mac/SynapsMac/)
+[![macOS](https://img.shields.io/badge/macOS-SwiftUI_Native-FF3B30?style=flat-square&logo=apple&logoColor=white)](clients/mac/SynapsMac/)
+[![iOS](https://img.shields.io/badge/iOS-SwiftUI_Native-FF2D55?style=flat-square&logo=apple&logoColor=white)](clients/ios/SynapsiOS/)
 [![SQLite](https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](backend/database.py)
 [![License](https://img.shields.io/badge/license-MIT_/_Personal-success?style=flat-square)](LICENSE)
 
@@ -54,39 +55,46 @@ Whether backing up direct USB imports from an iPhone via ImageCaptureCore, catal
 - **Hardware iPhone ImageCapture Integration**: Plug in your iPhone via USB, unlock, and immediately preview and import camera roll media directly into the NAS storage pipeline.
 - **Resilient Background Sync**: Non-blocking upload queues, retry loops, and native OS notifications on commit completion.
 
+### 📱 Native iOS Photos Companion (`SynapsiOS`)
+- **Authentic Apple Photos Experience**: Continuous timeline scroll with dynamic date range header, top gradient blur, and 5-column/3-column density.
+- **Visual Vault Badging**: 🟢 Green checkmark for committed NAS media, 🔴 Red cross for uncommitted camera roll items.
+- **Automated Wi-Fi Background Sync**: Automatically detects home Wi-Fi and triggers background upload tasks (`BGTaskScheduler`) without using cellular data.
+- **Manual Selection & Pre-Check**: Multi-select sync with zero-byte instant deduplication against NAS storage.
+- **Remote NAS Vault Browser**: Direct file and directory explorer on your iPhone.
+
 ---
 
 ## 🏛 Architecture
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                   Clients & Frontends                  │
-├──────────────────────────┬─────────────────────────────┤
-│   Next.js 14 Web App     │    SynapsMac (SwiftUI)      │
-│   • Liquid Glass Design  │    • USB ImageCaptureCore   │
-│   • Timeline & Gallery   │    • QuickLook Preview      │
-│   • Directory Finder     │    • Git-for-Files Sync     │
-└─────────────┬────────────┴──────────────┬──────────────┘
-              │                           │
-         HTTP / REST                 HTTP / REST
-              │                           │
-┌─────────────▼───────────────────────────▼──────────────┐
-│             Synaps Asynchronous Backend Engine         │
-│                        (FastAPI)                       │
-├────────────────────────────────────────────────────────┤
-│  • Startup Filesystem Scanner & Watcher                │
-│  • LIFO WebP Thumbnail Generation Engine               │
-│  • Background Thumbnail Preheating Pipeline            │
-│  • Import Stager, Metadata Extractor & Dedup Check     │
-│  • Soft-Delete Trash Manager with 30-Day Auto Purge    │
-└──────────────────────────┬─────────────────────────────┘
-                           │
-       ┌───────────────────┴───────────────────┐
-       ▼                                       ▼
-┌──────────────┐                     ┌───────────────────┐
-│ SQLite Store │                     │   NAS Filesystem  │
-│ (synaps.db)  │                     │  (/storage/Vault) │
-└──────────────┘                     └───────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                          Clients & Frontends                           │
+├──────────────────────┬──────────────────────────┬──────────────────────┤
+│  Next.js 14 Web App  │   SynapsMac (SwiftUI)    │ SynapsiOS (SwiftUI)  │
+│  • Liquid Glass UI   │   • USB ImageCaptureCore │ • Apple Photos Grid  │
+│  • Timeline & Finder │   • QuickLook Preview    │ • Wi-Fi Auto-Sync    │
+│  • Media Streaming   │   • Git-for-Files Sync   │ • NAS Vault Browser  │
+└──────────┬───────────┴────────────┬─────────────┴──────────┬───────────┘
+           │                        │                        │
+      HTTP / REST              HTTP / REST              HTTP / REST
+           │                        │                        │
+┌──────────▼────────────────────────▼────────────────────────▼───────────┐
+│                   Synaps Asynchronous Backend Engine                   │
+│                                (FastAPI)                               │
+├────────────────────────────────────────────────────────────────────────┤
+│  • Startup Filesystem Scanner & Watcher                                │
+│  • LIFO WebP Thumbnail Generation Engine                               │
+│  • Background Thumbnail Preheating Pipeline                            │
+│  • Import Stager, Metadata Extractor & Dedup Check                     │
+│  • Soft-Delete Trash Manager with 30-Day Auto Purge                    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+        ┌───────────────────────────┴───────────────────────────┐
+        ▼                                                       ▼
+┌──────────────┐                                       ┌───────────────────┐
+│ SQLite Store │                                       │   NAS Filesystem  │
+│ (synaps.db)  │                                       │  (/storage/Vault) │
+└──────────────┘                                       └───────────────────┘
 ```
 
 ---
@@ -98,6 +106,7 @@ Whether backing up direct USB imports from an iPhone via ImageCaptureCore, catal
 | **Backend API** | Python 3.11+, FastAPI, SQLAlchemy | High-concurrency async file ingestion, indexing, and thumbnail engine. | [`backend/`](backend/) |
 | **Web Dashboard** | Next.js 14 (App Router), TypeScript, Tailwind CSS | Frosted glass interface with light/dark modes, timeline, search, and settings. | [`frontend/`](frontend/) |
 | **macOS Client** | Swift 5.9+, SwiftUI, ImageCaptureCore | Native Finder-like client with direct iPhone USB import and synchronization. | [`clients/mac/SynapsMac/`](clients/mac/SynapsMac/) |
+| **iOS Client** | Swift 5.9+, SwiftUI, PhotoKit | Native Apple Photos companion with Wi-Fi auto-sync and vault status badging. | [`clients/ios/SynapsiOS/`](clients/ios/SynapsiOS/) |
 | **Storage Engine** | SQLite, Pillow, FFmpeg | Robust database modeling and media processing pipelines. | [`backend/models.py`](backend/models.py) |
 
 ---
@@ -148,6 +157,17 @@ SOURCE_MAPPING = {
 
 - **Web Dashboard**: `http://localhost:3000`
 - **FastAPI Documentation**: `http://localhost:8000/docs`
+
+### 4. Running Native Clients
+
+- **macOS Companion (`SynapsMac`)**:
+  ```bash
+  cd clients/mac/SynapsMac && ./bundle_app.sh && open SynapsMac.app
+  ```
+- **iOS Photos Companion (`SynapsiOS`)**:
+  ```bash
+  open clients/ios/SynapsiOS/SynapsiOS.xcodeproj
+  ```
 
 ---
 

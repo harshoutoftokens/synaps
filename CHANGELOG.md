@@ -5,7 +5,23 @@ Versions are grouped by major development milestone rather than individual commi
 
 ---
 
-## v0.5 – Apple Photos UI Redesign *(Current — June 2026)*
+## v2.1 – Native iOS Photos Companion *(October 2026)*
+
+> Introduces the native iOS Photos client (`clients/ios/SynapsiOS`), bringing continuous timeline scrolling, automated Wi-Fi background backup, visual commit badging, and remote NAS vault exploration to iPhone devices.
+
+### Added
+- **Native iOS Photos Client** (`SynapsiOS`) — built with SwiftUI, PhotoKit, and BackgroundTasks framework
+- **Continuous Timeline Scroll** — seamless, uninterrupted grid matching Apple Photos with dynamic date range subtitles (`23 – 27 Sep 2026`) and top gradient blur
+- **Visual Vault Badging** — 🟢 green tick for committed photos/videos, 🔴 red cross for uncommitted media awaiting backup
+- **Wi-Fi Background Sync** — automated Wi-Fi connectivity monitoring via `NWPathMonitor` with `BGTaskScheduler` background execution
+- **Manual Selection & Pre-Check** — multi-select sync toolbar with zero-byte instant deduplication (`/api/v2/ingest/check`)
+- **Uncommitted Staging Tab** — dedicated overview of pending files with total transfer size and one-tap "Commit All" action
+- **NAS Vault Explorer** — remote directory and file browser directly on iPhone
+- **Local SQLite State Store** — persistent cache for asset hashes and audit logs
+
+---
+
+## v0.5 – Apple Photos UI Redesign *(June 2026)*
 
 > Major visual overhaul. The entire interface was rebuilt with a Liquid Glass aesthetic inspired by Apple Photos. This is the most significant frontend change in the project's history.
 

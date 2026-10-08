@@ -1,6 +1,6 @@
 import Foundation
 
-public final class LocalFileScanner {
+public final class LocalFileScanner: @unchecked Sendable {
     public static let shared = LocalFileScanner()
     private let cacheStore = LocalCacheStore.shared
     private let hashQueue = DispatchQueue(label: "com.synaps.hashqueue", qos: .utility)
