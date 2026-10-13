@@ -2,7 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+/* No web-font import: an @import placed after the Tailwind layers is invalid CSS and was always
+   ignored by browsers, and a working one would block first paint on Google Fonts from the LAN.
+   Text renders with the system font stack below (SF Pro on Apple devices). */
 
 /* ═══════════════════════════════════════════════════════════
    SYNAPS — LIQUID GLASS DESIGN SYSTEM
@@ -186,45 +188,19 @@ body {
 
 /* ── Media Grid ─────────────────────────────────────────── */
 
+/* Windowed: MediaGrid sets the height and absolutely positions each tile (3px gaps,
+   140–180px minimum tile size by breakpoint, see minTileSize()). */
 .media-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 3px;
-}
-
-@media (min-width: 640px) {
-  .media-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 3px;
-  }
-}
-
-@media (min-width: 768px) {
-  .media-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 3px;
-  }
-}
-
-@media (min-width: 1024px) {
-  .media-grid {
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-    gap: 3px;
-  }
-}
-
-@media (min-width: 1280px) {
-  .media-grid {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 3px;
-  }
+  position: relative;
+  width: 100%;
 }
 
 /* ── Media Thumbnail ────────────────────────────────────── */
 
 .media-thumb {
-  position: relative;
-  aspect-ratio: 1;
+  position: absolute;
+  display: block;
+  padding: 0;
   overflow: hidden;
   border-radius: 6px;
   cursor: pointer;
@@ -236,6 +212,12 @@ body {
   transform: scale(1.015);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   border-color: var(--glass-border-light);
+  z-index: 1;
+}
+
+.media-thumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
   z-index: 1;
 }
 

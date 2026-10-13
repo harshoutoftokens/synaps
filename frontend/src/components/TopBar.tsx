@@ -1,10 +1,8 @@
 'use client';
 
 import { useAppStore } from '@/lib/store';
-import { usePathname } from 'next/navigation';
 import { GlassSegmentedControl } from '@/components/glass/GlassSegmentedControl';
-import { GlassButton } from '@/components/glass/GlassButton';
-import { Menu, Search, SlidersHorizontal, MoreHorizontal } from 'lucide-react';
+import { Menu, Search, SlidersHorizontal } from 'lucide-react';
 import Link from 'next/link';
 
 interface TopBarProps {
@@ -27,8 +25,11 @@ export function TopBar({
   showSourcesButton = false,
   children,
 }: TopBarProps) {
-  const { toggleSidebar, activeView, setActiveView, activeSources } = useAppStore();
-  const pathname = usePathname();
+  // Select only what the bar shows: a bare useAppStore() re-renders on every store change
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const activeView = useAppStore((s) => s.activeView);
+  const setActiveView = useAppStore((s) => s.setActiveView);
+  const activeSources = useAppStore((s) => s.activeSources);
 
   return (
     <header
@@ -43,6 +44,7 @@ export function TopBar({
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={toggleSidebar}
+            aria-label="Open menu"
             className="p-2 -ml-2 rounded-xl hover:bg-[var(--glass-bg-hover)] transition-colors lg:hidden"
           >
             <Menu size={20} className="text-[var(--text-secondary)]" />
@@ -77,10 +79,13 @@ export function TopBar({
             </div>
           )}
           {children}
-          <Link href="/search">
-            <GlassButton variant="ghost" size="md">
-              <Search size={18} className="text-[var(--text-secondary)]" />
-            </GlassButton>
+          <Link
+            href="/search"
+            aria-label="Search"
+            className="inline-flex items-center justify-center transition-all duration-200 p-2 rounded-xl
+              text-[var(--text-secondary)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <Search size={18} className="text-[var(--text-secondary)]" />
           </Link>
         </div>
       </div>

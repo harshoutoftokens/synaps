@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 
+/** Something the media viewer can show: an indexed media item, or a raw file opened from Finder. */
+export type ViewerEntry =
+  | { kind: 'media'; id: string }
+  | { kind: 'file'; path: string; name: string; fileType: string; sizeHuman?: string };
+
 interface AppState {
   // Theme
   theme: 'light' | 'dark' | 'system';
@@ -10,10 +15,13 @@ interface AppState {
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
 
-  // Media Viewer
+  // Media Viewer — the list it was opened from, so ←/→ can step through it
   viewerOpen: boolean;
-  viewerMediaId: string | null;
-  openViewer: (mediaId: string) => void;
+  viewerEntries: ViewerEntry[];
+  viewerIndex: number;
+  openViewer: (mediaId: string, siblingIds?: string[]) => void;
+  openEntries: (entries: ViewerEntry[], index: number) => void;
+  setViewerIndex: (index: number) => void;
   closeViewer: () => void;
 
   // Library filter (media type)
@@ -33,9 +41,13 @@ interface AppState {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
 
-  // Deleted items tracking
+  // Deleted items tracking (hidden from grids until the next refetch)
   deletedMediaIds: Set<string>;
   markAsDeleted: (id: string) => void;
+
+  // Favorite toggles made in the viewer, so grid badges update without a refetch
+  favoriteOverrides: Record<string, boolean>;
+  setFavoriteOverride: (id: string, isFavorite: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -43,16 +55,27 @@ export const useAppStore = create<AppState>((set) => ({
   theme: 'dark',
   setTheme: (theme) => set({ theme }),
 
-  // Sidebar
-  sidebarOpen: true,
+  // Sidebar — only affects the mobile drawer (always visible on lg+), so start closed
+  sidebarOpen: false,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
   // Viewer
   viewerOpen: false,
-  viewerMediaId: null,
-  openViewer: (mediaId) => set({ viewerOpen: true, viewerMediaId: mediaId }),
-  closeViewer: () => set({ viewerOpen: false, viewerMediaId: null }),
+  viewerEntries: [],
+  viewerIndex: 0,
+  openViewer: (mediaId, siblingIds) => {
+    const ids = siblingIds && siblingIds.includes(mediaId) ? siblingIds : [mediaId];
+    set({
+      viewerOpen: true,
+      viewerEntries: ids.map((id) => ({ kind: 'media' as const, id })),
+      viewerIndex: ids.indexOf(mediaId),
+    });
+  },
+  openEntries: (entries, index) =>
+    set({ viewerOpen: entries.length > 0, viewerEntries: entries, viewerIndex: index }),
+  setViewerIndex: (index) => set({ viewerIndex: index }),
+  closeViewer: () => set({ viewerOpen: false, viewerEntries: [], viewerIndex: 0 }),
 
   // Library filter
   activeFilter: null,
@@ -85,4 +108,9 @@ export const useAppStore = create<AppState>((set) => ({
       newSet.add(id);
       return { deletedMediaIds: newSet };
     }),
+
+  // Favorites
+  favoriteOverrides: {},
+  setFavoriteOverride: (id, isFavorite) =>
+    set((s) => ({ favoriteOverrides: { ...s.favoriteOverrides, [id]: isFavorite } })),
 }));
