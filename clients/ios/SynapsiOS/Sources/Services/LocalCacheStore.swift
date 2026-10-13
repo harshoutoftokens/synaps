@@ -476,6 +476,48 @@ public final class LocalCacheStore: @unchecked Sendable {
         }
     }
     
+    /// Marks parts the NAS already holds (found by `NASClient.matchExisting`, e.g. uploaded from
+    /// another device) as committed, without reading or uploading them. Parts that are already
+    /// committed keep their own hash. Returns the ids of the assets that changed.
+    @discardableResult
+    public func markPartsFoundOnNAS(_ refs: [(assetId: String, kind: AssetPartKind, sha256: String)], policy: PartPolicy) -> Set<String> {
+        guard !refs.isEmpty else { return [] }
+        let now = Date().timeIntervalSince1970
+        return queue.sync {
+            inTransaction {
+                var changed = Set<String>()
+                for ref in refs {
+                    // hash_mtime = the asset's current mtime, so edited renders count as up to date too
+                    let ok = run("""
+                        UPDATE asset_parts SET committed_at = ?1, sha256 = ?2,
+                            hash_mtime = (SELECT mtime FROM local_assets WHERE id = ?3)
+                        WHERE asset_id = ?3 AND kind = ?4 AND committed_at IS NULL;
+                        """) { stmt in
+                        self.bind(stmt, 1, now)
+                        self.bind(stmt, 2, ref.sha256)
+                        self.bind(stmt, 3, ref.assetId)
+                        self.bind(stmt, 4, ref.kind.rawValue)
+                    }
+                    if ok && sqlite3_changes(db) > 0 {
+                        changed.insert(ref.assetId)
+                    }
+                }
+                for id in changed where policy.status(for: partsUnlocked(assetId: id), lastAttemptFailed: false) == .committed {
+                    run("""
+                        UPDATE local_assets SET sync_status = 'committed', last_synced_at = ?1,
+                            fail_count = 0, last_error = NULL,
+                            sha256 = COALESCE((SELECT sha256 FROM asset_parts WHERE asset_id = ?2 AND is_primary = 1), sha256)
+                        WHERE id = ?2;
+                        """) { stmt in
+                        self.bind(stmt, 1, now)
+                        self.bind(stmt, 2, id)
+                    }
+                }
+                return changed
+            }
+        }
+    }
+    
     /// Re-derives an asset's status from its parts and records the outcome of a sync attempt.
     /// `error` non-nil marks the attempt failed (feeds the automatic-sync backoff).
     @discardableResult

@@ -141,6 +141,10 @@ public final class SyncManager: ObservableObject {
         PhotoLibraryService.shared.refreshAuthorizationStatus()
         Task {
             await checkNASStatus()
+            // Mark photos the NAS already has (e.g. uploaded via the Mac) before deciding what to upload
+            if isConnectedToNAS {
+                await NASReconciler.shared.reconcileIfDue()
+            }
             await requestAutomaticSync()
         }
     }

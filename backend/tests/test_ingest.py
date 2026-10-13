@@ -764,3 +764,28 @@ def test_v1_source_key():
     assert v1_source_key("win_laptop_hp", "Windows") == "windows"
     assert v1_source_key("iphone_harsh", "") == "iphone"
     assert v1_source_key("gdrive_harsh", "cloud") == "gdrive_harsh"
+
+
+def test_match_finds_files_uploaded_from_another_device(client, clean_db):
+    """The iPhone can learn that a photo reached the NAS through the Mac, by name + size."""
+    data = unique_jpeg("match")
+    assert upload_stream(client, data, "/Users/me/Documents/trip/IMG_7628.HEIC").status_code == 200
+
+    resp = client.post("/api/v2/ingest/match", json={"files": [
+        {"filename": "IMG_7628.HEIC", "size": len(data)},        # same file, other device
+        {"filename": "IMG_7628.HEIC", "size": len(data) + 1},    # same name, different size
+        {"filename": "IMG_0001.HEIC", "size": len(data)},        # same size, different name
+    ]})
+    assert resp.status_code == 200
+    assert resp.json()["matches"] == [
+        {"filename": "IMG_7628.HEIC", "size": len(data), "sha256": sha256_hex(data)}
+    ]
+
+
+def test_match_is_read_only_and_bounded(client, clean_db, db_session):
+    from models_v2 import LogicalItem
+    resp = client.post("/api/v2/ingest/match", json={"files": [{"filename": "a.jpg", "size": 1}]})
+    assert resp.json() == {"matches": []}
+    assert db_session.query(LogicalItem).count() == 0
+    too_many = [{"filename": f"{i}.jpg", "size": 1} for i in range(2001)]
+    assert client.post("/api/v2/ingest/match", json={"files": too_many}).status_code == 413
