@@ -1,20 +1,37 @@
 import SwiftUI
 import Photos
 import UIKit
+import AVKit
 
 public struct PhotoDetailView: View {
     public let item: SynapsMediaItem
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var syncManager = SyncManager.shared
+    @Environment(\.displayScale) private var displayScale
+    /// Observed so the status pill / commit button follow the sync live.
+    @ObservedObject private var library = PhotoLibraryService.shared
     
     @State private var fullImage: UIImage? = nil
     @State private var showInfoSheet = false
-    @State private var currentItem: SynapsMediaItem
     @State private var scale: CGFloat = 1.0
+    @State private var committedScale: CGFloat = 1.0
+    @State private var player: AVPlayer? = nil
+    @State private var isLoadingVideo = false
+    @State private var viewSize: CGSize = .zero
     
     public init(item: SynapsMediaItem) {
         self.item = item
-        self._currentItem = State(initialValue: item)
+    }
+    
+    /// Latest state of this asset (status changes while the sheet is open).
+    private var currentItem: SynapsMediaItem {
+        library.item(withId: item.id) ?? item
+    }
+    
+    /// Screen-sized request (×2 for zoom, capped): PHImageManagerMaximumSize decoded full
+    /// 48 MP originals (~190 MB of pixels) just to show them on a phone screen.
+    private var imageRequestSide: CGFloat {
+        let longest = max(viewSize.width, viewSize.height)
+        return min(4096, max(1024, (longest * displayScale * 2).rounded()))
     }
     
     public var body: some View {
@@ -24,7 +41,10 @@ public struct PhotoDetailView: View {
                 
                 // Full Screen Image
                 Group {
-                    if let img = fullImage {
+                    if let player {
+                        VideoPlayer(player: player)
+                            .ignoresSafeArea()
+                    } else if let img = fullImage {
                         Image(uiImage: img)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
@@ -32,14 +52,38 @@ public struct PhotoDetailView: View {
                             .gesture(
                                 MagnificationGesture()
                                     .onChanged { val in
-                                        scale = max(1.0, min(val, 4.0))
+                                        scale = max(1.0, min(committedScale * val, 4.0))
                                     }
                                     .onEnded { _ in
-                                        withAnimation(.spring()) {
-                                            if scale < 1.0 { scale = 1.0 }
-                                        }
+                                        committedScale = scale
                                     }
                             )
+                            .onTapGesture(count: 2) {
+                                withAnimation(.spring()) {
+                                    scale = 1.0
+                                    committedScale = 1.0
+                                }
+                            }
+                            .overlay {
+                                if currentItem.isVideo {
+                                    Button {
+                                        Task { await startVideo() }
+                                    } label: {
+                                        if isLoadingVideo {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                .scaleEffect(1.4)
+                                        } else {
+                                            Image(systemName: "play.circle.fill")
+                                                .font(.system(size: 64))
+                                                .foregroundColor(.white.opacity(0.9))
+                                                .shadow(radius: 6)
+                                        }
+                                    }
+                                    .disabled(isLoadingVideo)
+                                    .accessibilityLabel("Play video")
+                                }
+                            }
                     } else {
                         VStack(spacing: 12) {
                             ProgressView()
@@ -135,7 +179,7 @@ public struct PhotoDetailView: View {
                                     .fill(currentItem.syncStatus == .committed ? Color.green.opacity(0.3) : Color.blue)
                             )
                         }
-                        .disabled(currentItem.syncStatus == .syncing)
+                        .disabled(currentItem.syncStatus == .syncing || currentItem.syncStatus == .committed)
                         
                         Spacer()
                         
@@ -152,33 +196,44 @@ public struct PhotoDetailView: View {
                 }
             }
             .navigationBarHidden(true)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { viewSize = proxy.size }
+                        .onChange(of: proxy.size) { viewSize = $0 }
+                }
+            )
             .sheet(isPresented: $showInfoSheet) {
                 MediaInfoSheet(item: currentItem)
             }
-            .onAppear {
-                loadFullMedia()
+            // Cancelled automatically when the sheet closes (cancels the PhotoKit request).
+            .task(id: "\(item.localIdentifier)#\(Int(imageRequestSide))") {
+                guard viewSize != .zero else { return }
+                let side = imageRequestSide
+                for await image in library.imageStream(for: item.localIdentifier, targetSize: CGSize(width: side, height: side), contentMode: .aspectFit) {
+                    fullImage = image
+                }
+            }
+            .onDisappear {
+                player?.pause()
             }
         }
     }
     
-    private func loadFullMedia() {
-        PhotoLibraryService.shared.requestFullImage(for: currentItem.localIdentifier) { img in
-            self.fullImage = img
-        }
+    private func startVideo() async {
+        guard player == nil, !isLoadingVideo else { return }
+        isLoadingVideo = true
+        let playerItem = await library.playerItem(for: item.localIdentifier)
+        isLoadingVideo = false
+        guard let playerItem else { return }
+        let newPlayer = AVPlayer(playerItem: playerItem)
+        player = newPlayer
+        newPlayer.play()
     }
     
     private func syncCurrentItem() {
-        syncManager.syncItems([currentItem])
-        // Update local item status once complete
-        Task {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if let rec = LocalCacheStore.shared.getRecord(id: currentItem.id) {
-                await MainActor.run {
-                    self.currentItem.syncStatus = SyncStatus(rawValue: rec.syncStatus) ?? .uncommitted
-                    self.currentItem.sha256 = rec.sha256
-                }
-            }
-        }
+        // Joins a running sync instead of replacing it; the status pill updates live.
+        SyncManager.shared.syncItems([currentItem])
     }
 }
 

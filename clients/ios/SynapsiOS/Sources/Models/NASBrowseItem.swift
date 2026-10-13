@@ -52,9 +52,23 @@ public struct NASFileItem: Codable, Identifiable, Sendable {
     }
     
     public var isImageOrVideo: Bool {
-        let ext = (`extension` ?? (name as NSString).pathExtension).lowercased()
-        let mediaExtensions = ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "mov", "mp4", "m4v"]
+        // /api/finder/browse classifies files itself ("image"/"video"/"document"/"other").
+        if let kind = file_type, kind == "image" || kind == "video" {
+            return true
+        }
+        // The backend sends the extension with its leading dot (".jpg"); strip it before matching.
+        var ext = (`extension` ?? (name as NSString).pathExtension).lowercased()
+        if ext.hasPrefix(".") {
+            ext.removeFirst()
+        }
+        let mediaExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "dng", "mov", "mp4", "m4v"]
         return mediaExtensions.contains(ext)
+    }
+    
+    public var isVideo: Bool {
+        if file_type == "video" { return true }
+        let ext = (name as NSString).pathExtension.lowercased()
+        return ["mov", "mp4", "m4v"].contains(ext)
     }
 }
 
@@ -83,5 +97,10 @@ public struct NASBrowseResponse: Codable, Sendable {
         self.total_files = total_files
         self.page = page
         self.per_page = per_page
+    }
+    
+    /// The backend reports the storage root as "/"; normalize it to "" for path math and display.
+    public var normalizedPath: String {
+        current_path == "/" ? "" : current_path
     }
 }

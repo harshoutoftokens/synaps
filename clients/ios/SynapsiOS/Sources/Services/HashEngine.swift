@@ -1,56 +1,47 @@
 import Foundation
 import CryptoKit
-import Photos
 
 public final class HashEngine: Sendable {
     public static let shared = HashEngine()
     
+    /// 4 MB reads: large enough to amortize syscalls, small enough to keep memory flat.
+    public static let chunkSize = 4 * 1024 * 1024
+    
     private init() {}
     
-    /// Computes SHA-256 of file at given URL using streaming chunks to keep memory usage constant.
+    /// Computes the SHA-256 of a file with incremental CryptoKit hashing so memory use stays
+    /// constant regardless of file size. Throws CancellationError if the calling task is cancelled.
     public func computeSHA256(for fileURL: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
         
         var hasher = SHA256()
-        let bufferSize = 1024 * 1024 // 1 MB
-        
         while true {
-            let data = handle.readData(ofLength: bufferSize)
-            if data.isEmpty { break }
-            hasher.update(data: data)
+            if Task.isCancelled {
+                throw CancellationError()
+            }
+            // autoreleasepool: FileHandle hands back bridged NSData that would otherwise pile
+            // up until the loop exits (GBs for a long 4K video).
+            let done: Bool = try autoreleasepool {
+                guard let chunk = try handle.read(upToCount: Self.chunkSize), !chunk.isEmpty else {
+                    return true
+                }
+                hasher.update(data: chunk)
+                return false
+            }
+            if done { break }
         }
-        
-        let digest = hasher.finalize()
-        return digest.map { String(format: "%02x", $0) }.joined()
+        return Self.hexString(hasher.finalize())
     }
     
-    /// Computes SHA-256 for a PHAsset using PHAssetResourceManager streaming data.
-    public func computeSHA256(for asset: PHAsset) async throws -> String {
-        let resources = PHAssetResource.assetResources(for: asset)
-        guard let primaryResource = resources.first(where: {
-            $0.type == .photo || $0.type == .video || $0.type == .pairedVideo || $0.type == .fullSizePhoto
-        }) ?? resources.first else {
-            throw NSError(domain: "HashEngine", code: 404, userInfo: [NSLocalizedDescriptionKey: "No suitable resource found for asset"])
+    static func hexString(_ digest: SHA256.Digest) -> String {
+        let hexDigits = Array("0123456789abcdef".utf8)
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(SHA256.Digest.byteCount * 2)
+        for byte in digest {
+            bytes.append(hexDigits[Int(byte >> 4)])
+            bytes.append(hexDigits[Int(byte & 0x0f)])
         }
-        
-        let tempDir = FileManager.default.temporaryDirectory
-        let tempFile = tempDir.appendingPathComponent("synaps_hash_\(UUID().uuidString).tmp")
-        defer { try? FileManager.default.removeItem(at: tempFile) }
-        
-        let options = PHAssetResourceRequestOptions()
-        options.isNetworkAccessAllowed = true
-        
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHAssetResourceManager.default().writeData(for: primaryResource, toFile: tempFile, options: options) { error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
-        
-        return try computeSHA256(for: tempFile)
+        return String(decoding: bytes, as: UTF8.self)
     }
 }

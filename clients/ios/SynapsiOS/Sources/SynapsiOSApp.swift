@@ -3,12 +3,12 @@ import BackgroundTasks
 
 @main
 public struct SynapsiOSApp: App {
+    // Background-task registration and background-URLSession relaunch handling live in the
+    // app delegate (didFinishLaunching runs before launch completes, as BGTaskScheduler requires).
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     
-    public init() {
-        // Register Background Tasks (BGAppRefresh & BGProcessing)
-        BackgroundSyncWorker.shared.registerBackgroundTasks()
-    }
+    public init() {}
     
     public var body: some Scene {
         WindowGroup {
@@ -19,9 +19,7 @@ public struct SynapsiOSApp: App {
             case .background:
                 BackgroundSyncWorker.shared.scheduleNextBackgroundSync()
             case .active:
-                Task {
-                    await SyncManager.shared.checkNASStatus()
-                }
+                SyncManager.shared.appDidBecomeActive()
             default:
                 break
             }

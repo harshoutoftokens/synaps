@@ -21,7 +21,7 @@ public struct NASVaultView: View {
                     .background(Color(UIColor.tertiarySystemBackground))
                     .cornerRadius(10)
                     
-                    if !viewModel.pathHistory.isEmpty {
+                    if viewModel.canGoBack {
                         HStack {
                             Button {
                                 viewModel.navigateBack()
@@ -35,7 +35,7 @@ public struct NASVaultView: View {
                             
                             Spacer()
                             
-                            Text(viewModel.currentPath.isEmpty ? "Root" : viewModel.currentPath)
+                            Text(viewModel.displayPath)
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
@@ -105,21 +105,17 @@ public struct NASVaultView: View {
                         
                         // Files section
                         if !viewModel.filteredFiles.isEmpty {
-                            Section("Files (\(viewModel.filteredFiles.count))") {
+                            Section(viewModel.hasMoreFiles && viewModel.searchQuery.isEmpty
+                                    ? "Files (\(viewModel.files.count) of \(viewModel.totalFiles))"
+                                    : "Files (\(viewModel.filteredFiles.count))") {
                                 ForEach(viewModel.filteredFiles) { file in
                                     HStack(spacing: 12) {
-                                        if file.isImageOrVideo, let thumbUrl = NASClient.shared.thumbnailURL(for: file.path) {
-                                            AsyncImage(url: thumbUrl) { phase in
-                                                switch phase {
-                                                case .success(let image):
-                                                    image.resizable().aspectRatio(contentMode: .fill)
-                                                default:
-                                                    Rectangle().fill(Color.gray.opacity(0.2))
-                                                        .overlay(Image(systemName: file.isImageOrVideo ? "photo" : "doc.fill").foregroundColor(.secondary))
-                                                }
-                                            }
-                                            .frame(width: 44, height: 44)
-                                            .cornerRadius(6)
+                                        if file.isImageOrVideo {
+                                            // AsyncImage can't send the API token and treats the NAS's
+                                            // 202 "thumbnail queued" as a failure.
+                                            NASThumbnailView(path: file.path, isVideo: file.isVideo)
+                                                .frame(width: 44, height: 44)
+                                                .cornerRadius(6)
                                         } else {
                                             Image(systemName: file.isImageOrVideo ? "photo" : "doc.fill")
                                                 .font(.system(size: 22))
@@ -153,15 +149,37 @@ public struct NASVaultView: View {
                                             .font(.system(size: 16))
                                     }
                                     .padding(.vertical, 2)
+                                    .onAppear {
+                                        viewModel.loadMoreIfNeeded(currentFile: file)
+                                    }
+                                }
+                                
+                                if viewModel.hasMoreFiles {
+                                    HStack {
+                                        Spacer()
+                                        if viewModel.isLoadingMore {
+                                            ProgressView()
+                                        }
+                                        Text("Showing \(viewModel.files.count) of \(viewModel.totalFiles)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                    }
                                 }
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .refreshable {
+                        viewModel.refresh()
+                    }
                 }
             }
             .navigationTitle("NAS Vault")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                viewModel.loadIfNeeded()
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -170,6 +188,41 @@ public struct NASVaultView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Authenticated NAS thumbnail with 202 ("queued") retry; cancelled when the row scrolls away.
+private struct NASThumbnailView: View {
+    let path: String
+    var isVideo: Bool = false
+    @State private var image: UIImage? = nil
+    
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+            }
+            if isVideo {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                    .shadow(radius: 2)
+            }
+        }
+        .clipped()
+        .task(id: path) {
+            // Reset on reuse for another file; memory hits render without a placeholder flash.
+            image = NASThumbnailLoader.shared.cachedImage(for: path)
+            if image == nil, let loaded = await NASThumbnailLoader.shared.image(for: path) {
+                image = loaded
             }
         }
     }
