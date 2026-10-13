@@ -5,6 +5,9 @@ Synaps Database Cleaner
 Scans all MediaFile records in the database and safely deletes any rows
 where the file no longer exists on disk.
 Also handles duplicate records (based on file_hash or just same physical path).
+
+Refuses to run when the storage root is missing/empty, and keeps rows whose top-level
+folder is missing or empty: that is an unmounted disk, not deleted files.
 """
 
 import os
@@ -13,7 +16,7 @@ import logging
 from collections import defaultdict
 from database import SessionLocal
 from models import MediaFile
-from config import EXCLUDED_PATHS
+from config import EXCLUDED_PATHS, STORAGE_PATH
 
 NORMALIZED_EXCLUDED_PATHS = [os.path.normpath(p) for p in EXCLUDED_PATHS]
 
@@ -37,6 +40,29 @@ def clean_database(dry_run: bool):
         logger.info("  *** EXECUTE MODE - APPLYING CHANGES ***")
     logger.info(f"{'=' * 60}")
 
+    try:
+        with os.scandir(STORAGE_PATH) as it:
+            mounted = any(not entry.name.startswith(".") for entry in it)
+    except OSError:
+        mounted = False
+    if not mounted:
+        logger.error(f"{STORAGE_PATH} is missing or empty (disk not mounted?) — refusing to touch the database.")
+        return
+
+    top_folder_ok = {}
+
+    def top_folder_available(relative_path):
+        top = (relative_path or "").split(os.sep)[0]
+        if not top or top in (".", ".."):
+            return True
+        if top not in top_folder_ok:
+            try:
+                with os.scandir(os.path.join(STORAGE_PATH, top)) as it:
+                    top_folder_ok[top] = any(True for _ in it)
+            except OSError:
+                top_folder_ok[top] = False
+        return top_folder_ok[top]
+
     db = SessionLocal()
     try:
         # Get all records
@@ -46,6 +72,7 @@ def clean_database(dry_run: bool):
         valid_records = []
         missing_records = []
         duplicate_records = []
+        offline_records = 0
         
         # Track by hash to find duplicates. Wait, file_hash might be empty for some?
         # Let's track by path to find DB duplicates pointing to the same file.
@@ -66,8 +93,13 @@ def clean_database(dry_run: bool):
                         is_excluded = True
                         break
 
-            if not os.path.exists(media.path) or is_excluded:
+            if is_excluded:
                 missing_records.append(media)
+            elif not os.path.exists(media.path):
+                if top_folder_available(media.relative_path):
+                    missing_records.append(media)
+                else:
+                    offline_records += 1  # top-level folder offline: keep the row
             else:
                 valid_records.append(media)
 
@@ -86,6 +118,8 @@ def clean_database(dry_run: bool):
         logger.info(f"Valid records: {len(valid_records) - duplicate_count}")
         logger.info(f"Missing/Stale files: {stale_count}")
         logger.info(f"Duplicate DB records: {duplicate_count}")
+        if offline_records:
+            logger.info(f"Kept (top-level folder missing/empty, disk offline?): {offline_records}")
 
         if stale_count > 0:
             logger.info("\n--- Missing/Stale Records (Old paths / Moved files) ---")

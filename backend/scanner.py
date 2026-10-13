@@ -3,6 +3,7 @@ Synaps Media Scanner — Async filesystem indexer
 Designed for low-power hardware with batch processing.
 """
 import os
+import re
 import hashlib
 import mimetypes
 import logging
@@ -11,19 +12,46 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from config import (
     STORAGE_PATH, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS,
     DOCUMENT_EXTENSIONS, RAW_EXTENSIONS, ALL_MEDIA_EXTENSIONS,
     SCAN_BATCH_SIZE, ALLOWED_SCAN_PATHS, SOURCE_MAPPING,
-    EXCLUDED_PATHS
+    EXCLUDED_PATHS, THUMBNAIL_DIR, TRASH_DIR
 )
 from models import MediaFile
 
 logger = logging.getLogger("synaps.scanner")
 
-# Normalize excluded paths
-NORMALIZED_EXCLUDED_PATHS = [os.path.normpath(p) for p in EXCLUDED_PATHS]
+# Never index the v2 hardlink mirrors (same inodes as the canonical Vault files) or the
+# upload/trash staging areas, even if config.EXCLUDED_PATHS doesn't list them.
+_BUILTIN_EXCLUDED_PATHS = ["Mirrors", ".synaps_tmp", ".synaps_trash"]
+
+def _normalize_excluded(paths) -> list:
+    normalized = []
+    for p in paths:
+        p = os.path.normpath(p.strip()).strip(os.sep)
+        if p and p != "." and p not in normalized:  # "" or "." would exclude the whole storage
+            normalized.append(p)
+    return normalized
+
+
+# Normalize excluded paths (relative to STORAGE_PATH, matched by whole path components)
+NORMALIZED_EXCLUDED_PATHS = _normalize_excluded([*EXCLUDED_PATHS, *_BUILTIN_EXCLUDED_PATHS])
+
+# Directory names that never hold user media
+_SKIP_DIR_NAMES = {'thumbnails', 'trash', 'venv', '__pycache__', 'node_modules', '.git'}
+
+# The garbage collection refuses to drop more than this share of the library in one scan
+# (a half-mounted disk looks exactly like "every file was deleted").
+GC_MAX_DELETE_FRACTION = 0.5
+GC_MIN_ROWS_FOR_GUARD = 20
+
+# v2 canonical layout: Vault/YYYY/MM/<sha256[:16]>_<name>
+_V2_CANONICAL_RE = re.compile(r"^Vault/\d{4}/\d{2}/[^/]+$")
+_V2_OBJECT_NAME_RE = re.compile(r"^Vault/\d{4}/\d{2}/[0-9a-f]{16}_[^/]+$")
 
 # Try to import exifread for EXIF metadata
 try:
@@ -257,20 +285,263 @@ def get_best_date(filepath: str, filename: str) -> datetime:
     return datetime.now()
 
 
-def scan_directory(db: Session, force_rescan: bool = False) -> dict:
+def is_excluded_path(rel_path: str) -> bool:
+    """True if rel_path (relative to STORAGE_PATH) is an excluded directory or inside one.
+    Whole path components are compared: "Vault/Harsh/Mac/Private" excludes
+    ".../Private/x.jpg" but not ".../PrivateTrip/x.jpg"."""
+    rel = os.path.normpath(rel_path)
+    for ep in NORMALIZED_EXCLUDED_PATHS:
+        if rel == ep or rel.startswith(ep + os.sep):
+            return True
+    return False
+
+
+def _platform_source(platform: Optional[str], source_id: Optional[str]) -> str:
+    """v2 device source -> media_files.source, the same mapping the v2 ingest upsert uses."""
+    try:
+        from routers.ingest_v2 import v1_source_key
+        return v1_source_key(source_id, platform)
+    except Exception:
+        pass  # standalone use without the API package: equivalent fallback
+    p = (platform or "").lower()
+    sid = (source_id or "").lower()
+    if p in ("ios", "iphone", "ipados"):
+        return "iphone"
+    if p in ("macos", "darwin", "mac", "osx"):
+        return "mac"
+    if p == "windows":
+        return "windows"
+    if "iphone" in sid or "ios" in sid:
+        return "iphone"
+    if "mac" in sid:
+        return "mac"
+    if "win" in sid or "laptop" in sid or "pc" in sid:
+        return "windows"
+    return sid or "unknown"
+
+
+def derive_source(relative_path: str, db: Optional[Session] = None) -> str:
+    """Timeline source for a file, from where it lives under STORAGE_PATH:
+      Vault/<Device>/...            e.g. Vault/Windows_laptop-HP/...  (SOURCE_MAPPING)
+      Vault/<Owner>/<Device>/...    e.g. Vault/Harsh/Iphone/...       -> "iphone"
+      Vault/YYYY/MM/<sha16>_<name>  v2 canonical object -> platform of the uploading device
+                                    (looked up in the v2 tables), "unknown" if not registered
+    """
+    rel = relative_path.replace(os.sep, "/")
+    parts = rel.split("/")
+    if len(parts) < 3 or parts[0] != "Vault":
+        return "unknown"
+    if _V2_CANONICAL_RE.match(rel):
+        if db is not None:
+            try:
+                row = db.execute(
+                    text("""
+                        SELECT s.platform, s.id
+                        FROM physical_objects po
+                        JOIN logical_items li ON li.physical_object_id = po.id
+                        JOIN sources s ON s.id = li.source_id
+                        WHERE po.physical_path = :p
+                        ORDER BY li.imported_at
+                        LIMIT 1
+                    """),
+                    {"p": relative_path},
+                ).first()
+                if row:
+                    return _platform_source(row[0], row[1])
+            except Exception as e:
+                logger.debug(f"v2 source lookup failed for {relative_path}: {e}")
+        return "unknown"
+    if parts[1] in SOURCE_MAPPING:
+        return SOURCE_MAPPING[parts[1]]
+    if len(parts) >= 4:  # parts[2] is a folder, not the file itself
+        return SOURCE_MAPPING.get(parts[2], parts[2].lower())
+    return "unknown"
+
+
+def vault_protection_reason(path: str, db: Optional[Session] = None,
+                            st: Optional[os.stat_result] = None) -> Optional[str]:
+    """Why v1 tools (trash, maintenance scripts) must not move or delete `path` because it
+    belongs to the v2 vault; None for an ordinary file.
+    Removing one link of a hardlinked file frees no space, and moving a canonical object
+    leaves physical_objects pointing at nothing while clients believe it is stored."""
+    if os.path.islink(path):
+        return "is a link to another file"
+    if st is None:
+        st = os.lstat(path)
+    if st.st_nlink > 1:
+        return "is hardlinked (Synaps vault/mirror copy); deleting one link frees no space"
+    rel_path = os.path.relpath(path, STORAGE_PATH)
+    if rel_path.split(os.sep)[0] == "Mirrors":
+        return "is a Mirrors/ entry managed by the Synaps vault"
+    if _V2_OBJECT_NAME_RE.match(rel_path.replace(os.sep, "/")):
+        return "is a canonical Synaps vault object"
+    if db is not None:
+        try:
+            registered = db.execute(
+                text("SELECT 1 FROM physical_objects WHERE physical_path = :p LIMIT 1"), {"p": rel_path}
+            ).first()
+        except Exception:
+            registered = None  # pre-v2 database without the table
+        if registered:
+            return "is a canonical Synaps vault object"
+    return None
+
+
+def _storage_is_mounted() -> bool:
+    """False if STORAGE_PATH is missing or empty — what an unmounted data disk looks like."""
+    try:
+        with os.scandir(STORAGE_PATH) as it:
+            return any(not entry.name.startswith(".") for entry in it)
+    except OSError:
+        return False
+
+
+def _build_media_file(filepath: str, root: str, filename: str, ext: str, db: Session) -> MediaFile:
+    file_stat = os.stat(filepath)
+    relative_path = os.path.relpath(filepath, STORAGE_PATH)
+    # v2 canonical objects are stored as <sha256[:16]>_<name>; index them under <name> like the
+    # ingest upsert does (classification looks at the name, e.g. IMG_1234.PNG screenshots)
+    if _V2_OBJECT_NAME_RE.match(relative_path.replace(os.sep, "/")):
+        filename = filename[17:] or filename
+    classification = classify_media(ext, filename)
+    date_taken = get_best_date(filepath, filename)
+    file_hash = compute_file_hash(filepath)
+    mime_type, _ = mimetypes.guess_type(filepath)
+
+    return MediaFile(
+        filename=filename,
+        path=filepath,
+        relative_path=relative_path,
+        directory=os.path.relpath(root, STORAGE_PATH),
+        source=derive_source(relative_path, db),
+        extension=ext,
+        mime_type=mime_type or "application/octet-stream",
+        file_size=file_stat.st_size,
+        media_type=classification["media_type"],
+        is_screenshot=classification["is_screenshot"],
+        is_screen_recording=classification["is_screen_recording"],
+        is_raw=classification["is_raw"],
+        date_taken=date_taken,
+        date_created=datetime.fromtimestamp(
+            getattr(file_stat, 'st_birthtime', file_stat.st_ctime)
+        ),
+        date_modified=datetime.fromtimestamp(file_stat.st_mtime),
+        file_hash=file_hash,
+    )
+
+
+# Columns a forced rescan refreshes on existing rows. source, is_favorite, thumbnails and
+# anything set by other writers (e.g. the v2 ingest upsert) are left alone.
+_RESCAN_COLUMNS = (
+    "filename", "relative_path", "directory", "extension", "mime_type", "file_size",
+    "media_type", "is_screenshot", "is_screen_recording", "is_raw",
+    "date_taken", "date_created", "date_modified", "file_hash",
+)
+
+
+def _commit_batch(db: Session, batch: list, stats: dict) -> None:
+    """Insert a batch; if a row appeared concurrently (unique path), fall back to row by row."""
+    try:
+        db.add_all(batch)
+        db.commit()
+        return
+    except IntegrityError:
+        db.rollback()
+    except Exception as e:
+        db.rollback()
+        stats["errors"] += len(batch)
+        stats["new"] -= len(batch)
+        logger.error(f"Batch commit failed ({len(batch)} files): {e}")
+        return
+    for media_file in batch:
+        try:
+            db.add(media_file)
+            db.commit()
+        except IntegrityError:
+            db.rollback()  # indexed by someone else meanwhile (e.g. the v2 ingest) — keep theirs
+            stats["new"] -= 1
+            stats["skipped"] += 1
+        except Exception as e:
+            db.rollback()
+            stats["new"] -= 1
+            stats["errors"] += 1
+            logger.error(f"Error indexing {media_file.path}: {e}")
+
+
+def _top_folder_available(relative_path: Optional[str], cache: dict) -> bool:
+    """False if the row's top-level folder (e.g. Vault/) is gone or empty: a separately
+    mounted disk that is offline, not a deleted file."""
+    top = (relative_path or "").replace(os.sep, "/").split("/")[0]
+    if not top or top in (".", ".."):
+        return True
+    if top not in cache:
+        try:
+            with os.scandir(os.path.join(STORAGE_PATH, top)) as it:
+                cache[top] = any(True for _ in it)
+        except OSError:
+            cache[top] = False
+    return cache[top]
+
+
+def _garbage_collect(db: Session, stats: dict, allow_mass_delete: bool) -> None:
+    """Drop rows whose file is gone or now lies in an excluded folder — unless the missing
+    files look like an unmounted/half-mounted disk rather than deleted files."""
+    if not _storage_is_mounted():
+        logger.warning(f"Skipping garbage collection: {STORAGE_PATH} is missing or empty (disk not mounted?)")
+        stats["gc_skipped"] = "storage_unavailable"
+        return
+
+    rows = db.query(MediaFile.id, MediaFile.path, MediaFile.relative_path).all()
+    missing, excluded, offline = [], [], 0
+    top_folders = {}
+    for media_id, path, relative_path in rows:
+        if relative_path and is_excluded_path(relative_path):
+            excluded.append(media_id)  # config decision, deleted even though the file exists
+        elif not os.path.exists(path):
+            if _top_folder_available(relative_path, top_folders):
+                missing.append(media_id)
+            else:
+                offline += 1
+
+    if offline:
+        logger.warning(f"Keeping {offline} records whose top-level folder is missing or empty (disk offline?)")
+    if (missing and not allow_mass_delete and len(rows) >= GC_MIN_ROWS_FOR_GUARD
+            and len(missing) > len(rows) * GC_MAX_DELETE_FRACTION):
+        logger.warning(
+            f"Not deleting {len(missing)} of {len(rows)} records whose files are missing: that looks "
+            f"like a storage problem, not deleted files. If it is real, run "
+            f"clean_stale_records.py --dry-run, then --execute."
+        )
+        stats["gc_skipped"] = "too_many_missing"
+        missing = []
+
+    stale_ids = missing + excluded
+    for i in range(0, len(stale_ids), 500):
+        db.query(MediaFile).filter(MediaFile.id.in_(stale_ids[i:i + 500])).delete(synchronize_session=False)
+    if stale_ids:
+        db.commit()
+        logger.info(f"Deleted {len(stale_ids)} stale records from database "
+                    f"({len(missing)} missing, {len(excluded)} excluded)")
+    stats["stale_deleted"] = len(stale_ids)
+
+
+def scan_directory(db: Session, force_rescan: bool = False, allow_mass_delete: bool = False) -> dict:
     """
     Scan the whitelisted storage directories and index all media files.
     Only indexes photos and videos (not documents) for the timeline.
     Optimized for low-power NAS with batch processing.
+    force_rescan refreshes metadata of already indexed files (keeping their source/favorites).
     """
-    stats = {"scanned": 0, "new": 0, "skipped": 0, "errors": 0}
+    stats = {"scanned": 0, "new": 0, "skipped": 0, "errors": 0, "updated": 0}
 
     # Pre-fetch all existing paths into memory for fast lookups
-    existing_paths = set()
-    if not force_rescan:
-        for (path,) in db.query(MediaFile.path).all():
-            existing_paths.add(path)
-        logger.info(f"Loaded {len(existing_paths)} existing paths from DB")
+    existing = {}
+    for media_id, path in db.query(MediaFile.id, MediaFile.path):
+        existing[path] = media_id
+    logger.info(f"Loaded {len(existing)} existing paths from DB")
+
+    # App directories that may sit inside the storage root (dev setups)
+    app_dirs = {os.path.abspath(THUMBNAIL_DIR), os.path.abspath(TRASH_DIR)}
 
     for base_path in ALLOWED_SCAN_PATHS:
         if not os.path.exists(base_path):
@@ -281,22 +552,19 @@ def scan_directory(db: Session, force_rescan: bool = False) -> dict:
 
         for root, dirs, files in os.walk(base_path):
             rel_root = os.path.relpath(root, STORAGE_PATH)
-            is_root_excluded = False
-            for ep in NORMALIZED_EXCLUDED_PATHS:
-                if rel_root == ep or rel_root.startswith(ep + os.sep):
-                    is_root_excluded = True
-                    break
-            
-            if is_root_excluded:
+            if rel_root != "." and is_excluded_path(rel_root):
                 dirs[:] = []  # Stop recursion
                 logger.debug(f"Skipping excluded directory: {rel_root}")
                 continue
 
-            # Skip hidden directories and system dirs
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in {
-                'thumbnails', 'trash', 'venv', '__pycache__',
-                'node_modules', '.git'
-            }]
+            # Skip hidden directories (.synaps_tmp, .git, ...), system dirs and excluded
+            # folders before descending into them
+            dirs[:] = [
+                d for d in dirs
+                if not d.startswith('.') and d not in _SKIP_DIR_NAMES
+                and os.path.abspath(os.path.join(root, d)) not in app_dirs
+                and not is_excluded_path(os.path.join(rel_root, d))
+            ]
 
             batch = []
 
@@ -310,94 +578,66 @@ def scan_directory(db: Session, force_rescan: bool = False) -> dict:
                     continue
 
                 filepath = os.path.join(root, filename)
-                relative_path = os.path.relpath(filepath, STORAGE_PATH)
                 stats["scanned"] += 1
 
                 # Fast memory lookup instead of DB query per file
-                if not force_rescan and filepath in existing_paths:
+                existing_id = existing.get(filepath)
+                if existing_id is not None and not force_rescan:
                     stats["skipped"] += 1
                     continue
 
                 try:
-                    file_stat = os.stat(filepath)
-                    classification = classify_media(ext, filename)
-                    date_taken = get_best_date(filepath, filename)
-                    file_hash = compute_file_hash(filepath)
-
-                    mime_type, _ = mimetypes.guess_type(filepath)
-
-                    # Derive source
-                    parts = relative_path.split('/')
-                    source_val = "unknown"
-                    if len(parts) >= 3 and parts[0] == "Vault":
-                        raw_source = parts[2]
-                        source_val = SOURCE_MAPPING.get(raw_source, raw_source.lower())
-
-                    media_file = MediaFile(
-                        filename=filename,
-                        path=filepath,
-                        relative_path=relative_path,
-                        directory=os.path.relpath(root, STORAGE_PATH),
-                        source=source_val,
-                        extension=ext,
-                        mime_type=mime_type or "application/octet-stream",
-                        file_size=file_stat.st_size,
-                        media_type=classification["media_type"],
-                        is_screenshot=classification["is_screenshot"],
-                        is_screen_recording=classification["is_screen_recording"],
-                        is_raw=classification["is_raw"],
-                        date_taken=date_taken,
-                        date_created=datetime.fromtimestamp(
-                            getattr(file_stat, 'st_birthtime', file_stat.st_ctime)
-                        ),
-                        date_modified=datetime.fromtimestamp(file_stat.st_mtime),
-                        file_hash=file_hash,
-                    )
-
-                    batch.append(media_file)
-                    stats["new"] += 1
-
-                    # Commit in batches to limit memory usage
-                    if len(batch) >= SCAN_BATCH_SIZE:
-                        db.add_all(batch)
-                        db.commit()
-                        logger.info(f"  Committed batch of {len(batch)} files")
-                        batch = []
-
+                    media_file = _build_media_file(filepath, root, filename, ext, db)
                 except Exception as e:
                     stats["errors"] += 1
                     logger.error(f"Error scanning {filepath}: {e}")
                     continue
 
+                if existing_id is not None:
+                    # Forced rescan of an indexed file: refresh file metadata in place
+                    try:
+                        db.query(MediaFile).filter(MediaFile.id == existing_id).update(
+                            {getattr(MediaFile, c): getattr(media_file, c) for c in _RESCAN_COLUMNS},
+                            synchronize_session=False,
+                        )
+                        stats["updated"] += 1
+                        if stats["updated"] % SCAN_BATCH_SIZE == 0:
+                            db.commit()
+                    except Exception as e:
+                        db.rollback()
+                        stats["errors"] += 1
+                        logger.error(f"Error refreshing {filepath}: {e}")
+                    continue
+
+                batch.append(media_file)
+                stats["new"] += 1
+
+                # Commit in batches to limit memory usage
+                if len(batch) >= SCAN_BATCH_SIZE:
+                    _commit_batch(db, batch, stats)
+                    logger.info(f"  Committed batch of {len(batch)} files")
+                    batch = []
+
             # Commit remaining batch for this directory
             if batch:
-                db.add_all(batch)
-                db.commit()
+                _commit_batch(db, batch, stats)
                 logger.info(f"  Committed final batch of {len(batch)} files from {root}")
+
+    if stats["updated"]:
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Committing refreshed records failed: {e}")
 
     # ── Database Garbage Collection ──
     logger.info("Running database garbage collection...")
-    all_media = db.query(MediaFile).all()
-    stale_count = 0
-    for media in all_media:
-        is_excluded = False
-        if media.relative_path:
-            norm_rel_path = os.path.normpath(media.relative_path)
-            for ep in NORMALIZED_EXCLUDED_PATHS:
-                if norm_rel_path == ep or norm_rel_path.startswith(ep + os.sep):
-                    is_excluded = True
-                    break
-
-        if not os.path.exists(media.path) or is_excluded:
-            db.delete(media)
-            stale_count += 1
-            if is_excluded and os.path.exists(media.path):
-                logger.info(f"Deleted excluded record from database: {media.relative_path}")
-            
-    if stale_count > 0:
-        db.commit()
-        logger.info(f"Deleted {stale_count} stale records from database")
-    stats["stale_deleted"] = stale_count
+    stats["stale_deleted"] = 0
+    try:
+        _garbage_collect(db, stats, allow_mass_delete)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Garbage collection failed: {e}")
 
     logger.info(f"Scan complete: {stats}")
     return stats
@@ -423,39 +663,16 @@ def index_single_file(filepath: str, db: Session) -> Optional[MediaFile]:
         return existing
 
     try:
-        file_stat = os.stat(filepath)
-        classification = classify_media(ext, filename)
-        date_taken = get_best_date(filepath, filename)
-        file_hash = compute_file_hash(filepath)
-        relative_path = os.path.relpath(filepath, STORAGE_PATH)
-        mime_type, _ = mimetypes.guess_type(filepath)
-
-        media_file = MediaFile(
-            filename=filename,
-            path=filepath,
-            relative_path=relative_path,
-            directory=os.path.relpath(os.path.dirname(filepath), STORAGE_PATH),
-            extension=ext,
-            mime_type=mime_type or "application/octet-stream",
-            file_size=file_stat.st_size,
-            media_type=classification["media_type"],
-            is_screenshot=classification["is_screenshot"],
-            is_screen_recording=classification["is_screen_recording"],
-            is_raw=classification["is_raw"],
-            date_taken=date_taken,
-            date_created=datetime.fromtimestamp(
-                getattr(file_stat, 'st_birthtime', file_stat.st_ctime)
-            ),
-            date_modified=datetime.fromtimestamp(file_stat.st_mtime),
-            file_hash=file_hash,
-        )
-
+        media_file = _build_media_file(filepath, os.path.dirname(filepath), filename, ext, db)
         db.add(media_file)
         db.commit()
         logger.info(f"Re-indexed restored file: {filename}")
         return media_file
 
+    except IntegrityError:
+        db.rollback()
+        return db.query(MediaFile).filter(MediaFile.path == filepath).first()
     except Exception as e:
+        db.rollback()
         logger.error(f"Failed to index restored file {filepath}: {e}")
         return None
-

@@ -14,6 +14,9 @@ Usage:
 Safety:
     - Never deletes files
     - Never overwrites — renames duplicates with a suffix
+    - Never touches Synaps v2 vault files (canonical Vault/YYYY/MM objects, hardlinked
+      or symlinked files, Mirrors/) — refuses to run on the Vault root or Mirrors/
+    - Updates media_files paths (keeps favorites) and carries cached thumbnails along
     - Cleans up empty folders after moving
     - Logs every operation
 """
@@ -26,7 +29,7 @@ import logging
 import argparse
 from pathlib import Path
 
-from config import ALLOWED_SCAN_PATHS, ALL_MEDIA_EXTENSIONS
+from config import ALLOWED_SCAN_PATHS, ALL_MEDIA_EXTENSIONS, STORAGE_PATH
 
 # ── Logging ──────────────────────────────────────────────────────────────
 
@@ -128,10 +131,33 @@ def remove_empty_dirs(path: str):
         pass
 
 
+def unsafe_base_reason(base_dir: str):
+    """Why base_dir must not be reorganized (None if it is fine)."""
+    real = os.path.realpath(base_dir)
+    storage = os.path.realpath(STORAGE_PATH)
+    if real == os.path.join(storage, "Vault"):
+        return "the Vault root holds the v2 canonical YYYY/MM folders"
+    mirrors = os.path.join(storage, "Mirrors")
+    if real == mirrors or real.startswith(mirrors + os.sep):
+        return "Mirrors/ is managed by the Synaps vault"
+    return None
+
+
+def _update_db_path(db, old_path: str, new_path: str) -> None:
+    from models import MediaFile
+    media = db.query(MediaFile).filter(MediaFile.path == old_path).first()
+    if media:
+        media.path = new_path
+        media.relative_path = os.path.relpath(new_path, STORAGE_PATH)
+        media.directory = os.path.relpath(os.path.dirname(new_path), STORAGE_PATH)
+        media.filename = os.path.basename(new_path)
+
+
 def move_old_media(
     base_dir: str,
     cutoff_year: int,
     dry_run: bool = True,
+    update_db: bool = True,
 ) -> dict:
     """
     Move all files from old year folders flat into Old_Photos/.
@@ -143,6 +169,7 @@ def move_old_media(
     stats = {
         "files_moved": 0,
         "files_renamed": 0,  # duplicates that were renamed with _1, _2 etc.
+        "skipped_vault": 0,  # v2 vault files left alone
         "folders_cleaned": 0,
         "errors": 0,
     }
@@ -177,9 +204,62 @@ def move_old_media(
         logger.info("  All old folders are empty. Nothing to move.")
         return stats
 
+    # DB session: v2 vault lookups (both modes) and path updates (execute mode)
+    db = None
+    try:
+        from database import SessionLocal
+        db = SessionLocal()
+    except Exception as e:
+        logger.warning(f"  Could not open DB session ({e}); vault checks use the file layout only")
+
+    try:
+        _move_all(all_files, old_photos_dir, dry_run, update_db, db, stats)
+    finally:
+        if db:
+            db.close()
+
+    # Clean up empty year/month folders
+    if not dry_run:
+        logger.info(f"\n  Cleaning up empty folders...")
+        for folder_path, year in old_folders:
+            remove_empty_dirs(folder_path)
+            if not os.path.exists(folder_path):
+                stats["folders_cleaned"] += 1
+                logger.info(f"  🗑️  Removed empty: {year}/")
+
+    # Summary
+    logger.info(f"\n{'=' * 60}")
+    logger.info(f"  SUMMARY — {mode_label}")
+    logger.info(f"{'=' * 60}")
+    logger.info(f"  Files {'would move' if dry_run else 'moved'}:     {stats['files_moved']}")
+    logger.info(f"  Renamed (duplicates):  {stats['files_renamed']}")
+    logger.info(f"  Skipped (vault files): {stats['skipped_vault']}")
+    logger.info(f"  Empty folders cleaned: {stats['folders_cleaned']}")
+    logger.info(f"  Errors:                {stats['errors']}")
+    logger.info(f"{'=' * 60}")
+
+    if dry_run:
+        logger.info(f"\n  This was a DRY RUN. No files were moved.")
+        logger.info(f"  To execute, run:  python move_old_media.py --execute\n")
+
+    return stats
+
+
+def _move_all(all_files, old_photos_dir, dry_run, update_db, db, stats):
+    from scanner import vault_protection_reason
+    from thumbnails import move_thumbnail
+
     # Move each file flat into Old_Photos/
     for filepath, year, folder_path in all_files:
         filename = os.path.basename(filepath)
+        try:
+            reason = vault_protection_reason(filepath, db)
+        except OSError as e:
+            reason = f"can't be inspected ({e})"
+        if reason:
+            stats["skipped_vault"] += 1
+            logger.info(f"  SKIP {year}/ {filename}: {reason}")
+            continue
         dest = safe_destination(old_photos_dir, filename)
         dest_filename = os.path.basename(dest)
 
@@ -197,6 +277,11 @@ def move_old_media(
                 os.makedirs(old_photos_dir, exist_ok=True)
                 shutil.move(filepath, dest)
                 stats["files_moved"] += 1
+                move_thumbnail(filepath, dest)
+                if db and update_db:
+                    _update_db_path(db, filepath, dest)
+                    if stats["files_moved"] % 50 == 0:
+                        db.commit()
 
                 if was_renamed:
                     stats["files_renamed"] += 1
@@ -208,30 +293,8 @@ def move_old_media(
                 stats["errors"] += 1
                 logger.error(f"  ❌ ERROR: {filename}: {e}")
 
-    # Clean up empty year/month folders
-    if not dry_run:
-        logger.info(f"\n  Cleaning up empty folders...")
-        for folder_path, year in old_folders:
-            remove_empty_dirs(folder_path)
-            if not os.path.exists(folder_path):
-                stats["folders_cleaned"] += 1
-                logger.info(f"  🗑️  Removed empty: {year}/")
-
-    # Summary
-    logger.info(f"\n{'=' * 60}")
-    logger.info(f"  SUMMARY — {mode_label}")
-    logger.info(f"{'=' * 60}")
-    logger.info(f"  Files {'would move' if dry_run else 'moved'}:     {stats['files_moved']}")
-    logger.info(f"  Renamed (duplicates):  {stats['files_renamed']}")
-    logger.info(f"  Empty folders cleaned: {stats['folders_cleaned']}")
-    logger.info(f"  Errors:                {stats['errors']}")
-    logger.info(f"{'=' * 60}")
-
-    if dry_run:
-        logger.info(f"\n  This was a DRY RUN. No files were moved.")
-        logger.info(f"  To execute, run:  python move_old_media.py --execute\n")
-
-    return stats
+    if db and update_db and not dry_run:
+        db.commit()
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────
@@ -266,6 +329,7 @@ Result:
         help="Year cutoff: files from folders BEFORE this year are moved (default: 2024)"
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Detailed output")
+    parser.add_argument("--no-db", action="store_true", help="Don't update media_files paths")
     parser.add_argument(
         "--path", type=str, default=None,
         help="Override source directory (defaults to ALLOWED_SCAN_PATHS[0])"
@@ -288,6 +352,11 @@ Result:
         logger.error(f"Directory does not exist: {base_dir}")
         sys.exit(1)
 
+    unsafe = unsafe_base_reason(base_dir)
+    if unsafe:
+        logger.error(f"Refusing to reorganize {base_dir}: {unsafe}. Point --path at a device folder, e.g. Vault/Harsh/Iphone")
+        sys.exit(1)
+
     if args.execute:
         print(f"\n  ⚠️  EXECUTE MODE")
         print(f"  Will move all files from folders before {args.cutoff}/ flat into Old_Photos/")
@@ -301,6 +370,7 @@ Result:
         base_dir=base_dir,
         cutoff_year=args.cutoff,
         dry_run=args.dry_run,
+        update_db=not args.no_db,
     )
 
 
