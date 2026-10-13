@@ -9,6 +9,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         BackgroundSyncWorker.shared.registerBackgroundTasks()
         // Reconnect to uploads that kept running while the app was suspended or terminated.
         UploadSessionManager.shared.activate()
+        // Lock Screen / Dynamic Island progress while a sync runs
+        if #available(iOS 16.2, *) {
+            SyncLiveActivityController.shared.start()
+        }
         #if DEBUG
         applyDebugLaunchArguments()
         #endif

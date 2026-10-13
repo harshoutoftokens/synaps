@@ -45,6 +45,16 @@ Synaps iOS brings the elegance and speed of Apple Photos together with your priv
 
 ---
 
+### 8. 🔒 Backup Progress on the Lock Screen
+While a backup runs, a Live Activity shows it on the Lock Screen (and in the Dynamic Island on iPhones that have one): a progress bar with `412/1,021` beside it and the file being uploaded. It turns into "Your backup is complete" with a green check when done, or an orange "Backup paused" with the reason. Turn it off in **Settings → Show Progress on Lock Screen**.
+
+![Lock Screen backup progress](lock-screen-preview.png)
+
+Notes: iOS only lets an app *start* a Live Activity while it is open, so a backup that the background worker starts on its own runs without one. While the app is suspended and only background uploads are running, the count can't update; after 5 minutes the banner says "Uploading in the background". Implemented by the `SynapsSyncActivity` widget extension (`Widgets/`) and `Sources/Services/SyncLiveActivity.swift`.
+
+### 9. 🔁 Photos Already on the NAS
+Photos that reached the NAS another way (for example AirDropped to the Mac and uploaded by the Mac app) are matched by file name and size and ticked without uploading: automatically every few hours, or via **Settings → Find Photos Already on NAS**.
+
 ## 🏗️ Architecture
 
 ```

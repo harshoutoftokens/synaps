@@ -42,7 +42,36 @@
 		AA00005B2C10000100000001 /* NASThumbnailLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005C2C10000100000001 /* NASThumbnailLoader.swift */; };
 		AA00006A2C10000100000001 /* NASReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00006B2C10000100000001 /* NASReconciler.swift */; };
 		AA00005D2C10000100000001 /* SyncProgressBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005E2C10000100000001 /* SyncProgressBanner.swift */; };
+		AA0001112C10000100000001 /* SyncActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001022C10000100000001 /* SyncActivityAttributes.swift */; };
+		AA0001122C10000100000001 /* SyncActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001022C10000100000001 /* SyncActivityAttributes.swift */; };
+		AA0001132C10000100000001 /* SyncLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001032C10000100000001 /* SyncLiveActivity.swift */; };
+		AA0001142C10000100000001 /* SyncLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001042C10000100000001 /* SyncLiveActivityWidget.swift */; };
+		AA0001152C10000100000001 /* SynapsSyncActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA0001012C10000100000001 /* SynapsSyncActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AA0001322C10000100000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000492C10000100000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0001202C10000100000001;
+			remoteInfo = SynapsSyncActivity;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AA0001302C10000100000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AA0001152C10000100000001 /* SynapsSyncActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		AA0000002C10000100000001 /* SynapsiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynapsiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -83,10 +112,22 @@
 		AA00005C2C10000100000001 /* NASThumbnailLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NASThumbnailLoader.swift; sourceTree = "<group>"; };
 		AA00006B2C10000100000001 /* NASReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NASReconciler.swift; sourceTree = "<group>"; };
 		AA00005E2C10000100000001 /* SyncProgressBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncProgressBanner.swift; sourceTree = "<group>"; };
+		AA0001012C10000100000001 /* SynapsSyncActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SynapsSyncActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0001022C10000100000001 /* SyncActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncActivityAttributes.swift; sourceTree = "<group>"; };
+		AA0001032C10000100000001 /* SyncLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLiveActivity.swift; sourceTree = "<group>"; };
+		AA0001042C10000100000001 /* SyncLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLiveActivityWidget.swift; sourceTree = "<group>"; };
+		AA0001052C10000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		AA0000392C10000100000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0001222C10000100000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -101,6 +142,7 @@
 			children = (
 				AA00003B2C10000100000001 /* Sources */,
 				AA00003C2C10000100000001 /* Resources */,
+				AA0001062C10000100000001 /* Widgets */,
 				AA00003D2C10000100000001 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -131,6 +173,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000002C10000100000001 /* SynapsiOS.app */,
+				AA0001012C10000100000001 /* SynapsSyncActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -144,6 +187,7 @@
 				AA00000A2C10000100000001 /* SyncActivityItem.swift */,
 				AA00000C2C10000100000001 /* NASBrowseItem.swift */,
 				AA0000542C10000100000001 /* AssetPart.swift */,
+				AA0001022C10000100000001 /* SyncActivityAttributes.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -163,6 +207,7 @@
 				AA00005A2C10000100000001 /* UploadSessionManager.swift */,
 				AA00005C2C10000100000001 /* NASThumbnailLoader.swift */,
 				AA00006B2C10000100000001 /* NASReconciler.swift */,
+				AA0001032C10000100000001 /* SyncLiveActivity.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -228,6 +273,15 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		AA0001062C10000100000001 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				AA0001042C10000100000001 /* SyncLiveActivityWidget.swift */,
+				AA0001052C10000100000001 /* Info.plist */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -237,15 +291,33 @@
 			buildPhases = (
 				AA0000482C10000100000001 /* Sources */,
 				AA0000392C10000100000001 /* Frameworks */,
+				AA0001302C10000100000001 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AA0001312C10000100000001 /* PBXTargetDependency */,
 			);
 			name = SynapsiOS;
 			productName = SynapsiOS;
 			productReference = AA0000002C10000100000001 /* SynapsiOS.app */;
 			productType = "com.apple.product-type.application";
+		};
+		AA0001202C10000100000001 /* SynapsSyncActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0001232C10000100000001 /* Build configuration list for PBXNativeTarget "SynapsSyncActivity" */;
+			buildPhases = (
+				AA0001212C10000100000001 /* Sources */,
+				AA0001222C10000100000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SynapsSyncActivity;
+			productName = SynapsSyncActivity;
+			productReference = AA0001012C10000100000001 /* SynapsSyncActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -258,6 +330,9 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					AA0000462C10000100000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					AA0001202C10000100000001 = {
 						CreatedOnToolsVersion = 15.0;
 					};
 				};
@@ -276,6 +351,7 @@
 			projectRoot = "";
 			targets = (
 				AA0000462C10000100000001 /* SynapsiOS */,
+				AA0001202C10000100000001 /* SynapsSyncActivity */,
 			);
 		};
 /* End PBXProject section */
@@ -320,10 +396,29 @@
 				AA00005B2C10000100000001 /* NASThumbnailLoader.swift in Sources */,
 				AA00006A2C10000100000001 /* NASReconciler.swift in Sources */,
 				AA00005D2C10000100000001 /* SyncProgressBanner.swift in Sources */,
+				AA0001112C10000100000001 /* SyncActivityAttributes.swift in Sources */,
+				AA0001132C10000100000001 /* SyncLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0001212C10000100000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0001142C10000100000001 /* SyncLiveActivityWidget.swift in Sources */,
+				AA0001122C10000100000001 /* SyncActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA0001312C10000100000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0001202C10000100000001 /* SynapsSyncActivity */;
+			targetProxy = AA0001322C10000100000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA00004B2C10000100000001 /* Debug */ = {
@@ -391,6 +486,62 @@
 			};
 			name = Release;
 		};
+		AA0001242C10000100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XRLQ266GVC;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.synaps.ios.SyncActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AA0001252C10000100000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XRLQ266GVC;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.synaps.ios.SyncActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -408,6 +559,15 @@
 			buildConfigurations = (
 				AA00004D2C10000100000001 /* Debug */,
 				AA00004E2C10000100000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0001232C10000100000001 /* Build configuration list for PBXNativeTarget "SynapsSyncActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0001242C10000100000001 /* Debug */,
+				AA0001252C10000100000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
