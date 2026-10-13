@@ -4,9 +4,12 @@ Maintains the adjacency tree in `filesystem_nodes` for fast O(1) folder navigati
 """
 import os
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from models_v2 import FilesystemNode, Source
+
+# Key in a get_or_create_node_path() cache holding the ids of nodes it created
+_CREATED = ("__created__",)
 
 
 def split_original_path(original_path: str, platform: str) -> List[str]:
@@ -40,12 +43,17 @@ def get_or_create_node_path(
     source_id: str,
     original_path: str,
     platform: str,
-    physical_object_id: Optional[str] = None
+    physical_object_id: Optional[str] = None,
+    cache: Optional[Dict[Tuple[str, Optional[int], str], FilesystemNode]] = None,
 ) -> FilesystemNode:
     """
     Recursively builds or resolves the node tree hierarchy for a path.
-    The final component is marked as is_directory=False with physical_object_id set.
+    The final component is marked as is_directory=False with physical_object_id set
+    (re-pointed if the file's content changed since it was last ingested).
     Returns the leaf FilesystemNode.
+
+    `cache` (optional, per request) remembers resolved nodes so a batch of files that
+    share folders doesn't re-query every path component of every file.
     """
     parts = split_original_path(original_path, platform)
     if not parts:
@@ -58,21 +66,24 @@ def get_or_create_node_path(
         is_leaf = (i == len(parts) - 1)
         is_dir = not is_leaf
 
-        # Check if node already exists
-        existing_node = (
-            db.query(FilesystemNode)
-            .filter(
-                FilesystemNode.source_id == source_id,
-                FilesystemNode.parent_id == current_parent_id,
-                FilesystemNode.name == part
+        # Check if node already exists (a folder created by this same batch has no other children)
+        key = (source_id, current_parent_id, part)
+        existing_node = cache.get(key) if cache is not None else None
+        if existing_node is None and not (cache is not None and current_parent_id in cache.get(_CREATED, ())):
+            existing_node = (
+                db.query(FilesystemNode)
+                .filter(
+                    FilesystemNode.source_id == source_id,
+                    FilesystemNode.parent_id == current_parent_id,
+                    FilesystemNode.name == part
+                )
+                .first()
             )
-            .first()
-        )
 
         if existing_node:
             node = existing_node
-            # If it's the leaf and was previously missing physical object, update it
-            if is_leaf and physical_object_id and not node.physical_object_id:
+            # Point the leaf at the file's current content (new, or changed on the source)
+            if is_leaf and physical_object_id and node.physical_object_id != physical_object_id:
                 node.physical_object_id = physical_object_id
                 node.is_directory = False
         else:
@@ -85,7 +96,11 @@ def get_or_create_node_path(
             )
             db.add(node)
             db.flush()  # Assign node.id
+            if cache is not None:
+                cache.setdefault(_CREATED, set()).add(node.id)
 
+        if cache is not None:
+            cache[key] = node
         current_parent_id = node.id
 
     return node

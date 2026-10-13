@@ -3,6 +3,7 @@
 # Run this once to set up the environment
 
 set -e
+cd "$(dirname "$0")"
 
 echo "╔══════════════════════════════════════╗"
 echo "║        Synaps — Initial Setup        ║"
@@ -40,6 +41,11 @@ echo ""
 echo "📦 Setting up Python backend..."
 cd backend
 
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'; then
+    echo "❌ Python 3.10 or newer is required (found $(python3 --version 2>&1))."
+    exit 1
+fi
+
 if [ ! -d "venv" ]; then
     python3 -m venv venv
     echo "  Created virtual environment"
@@ -48,6 +54,9 @@ fi
 source venv/bin/activate
 pip install -q -r requirements.txt
 echo "✅ Backend dependencies installed"
+if [ ! -f .env ]; then
+    echo "  Optional settings (storage path, API token, ...): cp backend/.env.example backend/.env"
+fi
 
 cd ..
 
@@ -55,7 +64,11 @@ cd ..
 echo ""
 echo "📦 Setting up Next.js frontend..."
 cd frontend
-npm install --silent
+if [ -f package-lock.json ]; then
+    npm ci --silent
+else
+    npm install --silent
+fi
 echo "✅ Frontend dependencies installed"
 
 # Build for production

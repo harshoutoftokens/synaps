@@ -3,6 +3,20 @@
 # Production startup script if not using systemd
 
 set -e
+cd "$(dirname "$0")"
+
+# SYNAPS_FRONTEND_DIST (environment or backend/.env): the backend serves the static web app
+frontend_dist() {
+    if [ -n "${SYNAPS_FRONTEND_DIST:-}" ]; then echo "$SYNAPS_FRONTEND_DIST"; return; fi
+    [ -f backend/.env ] || return 0
+    sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}SYNAPS_FRONTEND_DIST[[:space:]]*=[[:space:]]*//p' backend/.env \
+        | tail -n 1 | tr -d "\"'"
+}
+FRONTEND_DIST=$(frontend_dist)
+case "$FRONTEND_DIST" in
+    ""|/*) ;;
+    *) FRONTEND_DIST="backend/$FRONTEND_DIST" ;;  # relative paths resolve from backend/
+esac
 
 echo "🚀 Starting Synaps in Production Mode..."
 
@@ -18,12 +32,17 @@ cd ..
 # Wait for backend
 sleep 2
 
-# Start optimized frontend
-echo "🎨 Starting Next.js frontend on port 3000..."
-cd frontend
-npm run start &
-FRONTEND_PID=$!
-cd ..
+# Start optimized frontend (not needed when the backend serves the static export itself)
+FRONTEND_PID=""
+if [ -n "$FRONTEND_DIST" ] && [ -d "$FRONTEND_DIST" ]; then
+    echo "🎨 Web app served by the backend from $FRONTEND_DIST (http://localhost:8000)"
+else
+    echo "🎨 Starting Next.js frontend on port 3000..."
+    cd frontend
+    npm run start &
+    FRONTEND_PID=$!
+    cd ..
+fi
 
 echo "✅ Synaps is running in PRODUCTION mode."
 echo "Press Ctrl+C to stop."
@@ -33,7 +52,7 @@ cleanup() {
     echo ""
     echo "Stopping Synaps..."
     kill $BACKEND_PID 2>/dev/null
-    kill $FRONTEND_PID 2>/dev/null
+    [ -n "$FRONTEND_PID" ] && kill $FRONTEND_PID 2>/dev/null
     exit 0
 }
 

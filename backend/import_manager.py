@@ -24,14 +24,15 @@ from sqlalchemy.orm import Session
 from config import (
     IMPORT_SOURCE_DIR, IMPORT_DEST_BASE, IMPORT_OLD_PHOTOS_CUTOFF,
     IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, ALL_MEDIA_EXTENSIONS,
-    STORAGE_PATH,
+    STORAGE_PATH, SOURCE_MAPPING,
 )
 from scanner import (
-    get_best_date, compute_file_hash, compute_content_hash, classify_media,
-    scan_directory,
+    get_best_date, compute_content_hash, classify_media,
 )
 from models import MediaFile, SyncRecord
+from models_v2 import PhysicalObject
 from database import SessionLocal
+from storage_engine import claim_unique_path
 
 logger = logging.getLogger("synaps.import_manager")
 
@@ -105,6 +106,9 @@ class _JobStore:
 
 
 job_store = _JobStore()
+
+# Makes "is an import already running? if not, start one" atomic (two clicks / tabs)
+_start_lock = threading.Lock()
 
 
 # ── File Collection ──────────────────────────────────────────────────────
@@ -405,6 +409,18 @@ class ImportManager:
         return job
 
     @staticmethod
+    def execute_if_idle(source_dir: str = IMPORT_SOURCE_DIR) -> tuple[ImportJob, bool]:
+        """
+        Start an import unless a job is still running.
+        Returns (job, started): the new job, or the running one with started=False.
+        """
+        with _start_lock:
+            latest = job_store.get_latest()
+            if latest and latest.status not in ("complete", "error"):
+                return latest, False
+            return ImportManager.execute(source_dir), True
+
+    @staticmethod
     def get_job(job_id: str) -> Optional[ImportJob]:
         return job_store.get(job_id)
 
@@ -414,6 +430,37 @@ class ImportManager:
 
 
 # ── Background Import Execution ──────────────────────────────────────────
+
+def _source_for_path(filepath: str) -> str:
+    """Same source derivation as scanner.scan_directory (Vault/<Owner>/<Device>/...)."""
+    parts = os.path.relpath(filepath, STORAGE_PATH).split(os.sep)
+    if len(parts) >= 3 and parts[0] == "Vault":
+        return SOURCE_MAPPING.get(parts[2], parts[2].lower())
+    return "unknown"
+
+
+def _index_imported_files(db: Session, imported: list[tuple[str, Optional[str]]]) -> int:
+    """Index exactly the files this import moved (instead of rescanning the whole library).
+    imported: [(final_path, sha256 or None)]. Returns the number of rows created."""
+    from scanner import index_single_file
+
+    indexed = 0
+    for path, content_hash in imported:
+        try:
+            media = index_single_file(path, db)
+        except Exception as e:
+            logger.error(f"Indexing failed for {path}: {e}")
+            continue
+        if media is None:
+            continue
+        indexed += 1
+        if not media.source:
+            media.source = _source_for_path(path)
+        if content_hash and not media.content_hash:
+            media.content_hash = content_hash
+    db.commit()
+    return indexed
+
 
 def _run_import(source_dir: str, job: ImportJob):
     """
@@ -442,11 +489,11 @@ def _run_import(source_dir: str, job: ImportJob):
         job.phase = "Scanning metadata..."
         logger.info(f"Import [{job.id}]: Scanning {len(files)} files...")
 
-        # Pre-compute all destinations and hashes
-        file_plans = []  # [(filepath, dest_path, dest_label, file_hash, is_unknown)]
+        # Pre-compute all destinations
+        file_plans = []  # [(filepath, dest_path, dest_label, is_unknown)]
 
         # Pre-fetch existing hashes and sizes for fast duplicate checking
-        # Group existing files by size
+        # Group existing files by size: library (v1), synced uploads, and the v2 Vault
         existing_sizes = {}
         for row in db.query(MediaFile.id, MediaFile.file_size, MediaFile.content_hash, MediaFile.path).all():
             fid, fsize, fchash, fpath = row
@@ -460,12 +507,17 @@ def _run_import(source_dir: str, job: ImportJob):
                 existing_sizes[fsize] = []
             existing_sizes[fsize].append({"id": fid, "content_hash": fchash, "path": fpath, "type": "sync"})
 
+        for row in db.query(PhysicalObject.id, PhysicalObject.file_size, PhysicalObject.sha256, PhysicalObject.physical_path).all():
+            fid, fsize, fchash, fpath = row
+            if fsize not in existing_sizes:
+                existing_sizes[fsize] = []
+            existing_sizes[fsize].append({"id": fid, "content_hash": fchash, "path": os.path.join(STORAGE_PATH, fpath), "type": "v2"})
+
         for i, filepath in enumerate(files):
             filename = os.path.basename(filepath)
-            file_hash = compute_file_hash(filepath)
             (dest_path, label), is_unknown = _get_destination_with_unknown(filepath, filename)
 
-            file_plans.append((filepath, dest_path, label, file_hash, is_unknown))
+            file_plans.append((filepath, dest_path, label, is_unknown))
 
             # Update progress (0–15%)
             job.progress = int((i + 1) / len(files) * 15)
@@ -477,10 +529,11 @@ def _run_import(source_dir: str, job: ImportJob):
         logger.info(f"Import [{job.id}]: Organizing {len(file_plans)} files...")
 
         # Identify duplicates and build move list
-        moves = []  # [(src, dest, label, is_unknown)]
+        moves = []  # [(src, dest, label, is_unknown, content_hash or None)]
 
-        for filepath, dest_path, label, file_hash, is_unknown in file_plans:
+        for filepath, dest_path, label, is_unknown in file_plans:
             filename = os.path.basename(filepath)
+            incoming_hash = None
 
             # Duplicate check 1: Content Hash (Two-Stage Verification)
             try:
@@ -488,7 +541,6 @@ def _run_import(source_dir: str, job: ImportJob):
                 if fsize in existing_sizes:
                     # Stage 2: Size matches, so check content hashes
                     candidates = existing_sizes[fsize]
-                    incoming_hash = None
                     is_dup = False
                     dup_path = ""
                     
@@ -500,12 +552,12 @@ def _run_import(source_dir: str, job: ImportJob):
                         if not cand_hash:
                             if os.path.exists(cand_path):
                                 cand_hash = compute_content_hash(cand_path)
+                                candidate["content_hash"] = cand_hash
                                 # Update DB on the spot
                                 if candidate["type"] == "media":
                                     db.query(MediaFile).filter(MediaFile.id == candidate["id"]).update({"content_hash": cand_hash})
-                                else:
+                                elif candidate["type"] == "sync":
                                     db.query(SyncRecord).filter(SyncRecord.id == candidate["id"]).update({"content_hash": cand_hash})
-                                candidate["content_hash"] = cand_hash
                                 
                         if cand_hash:
                             if not incoming_hash:
@@ -524,45 +576,54 @@ def _run_import(source_dir: str, job: ImportJob):
                         logger.info(log_msg)
                         continue
             except OSError:
-                pass
+                fsize = None
 
-            # Duplicate check 2: destination file already exists
+            # Duplicate check 2: a file with the same name is already at the destination.
+            # Same name is not same photo (camera counters wrap, devices share naming), so
+            # compare content; a different file is imported under a _1, _2... name.
             if os.path.exists(dest_path):
-                job.duplicates_skipped += 1
-                job.processed_files += 1
-                logger.debug(f"  SKIP (file exists): {filename}")
-                continue
+                try:
+                    same_size = fsize is not None and os.path.getsize(dest_path) == fsize
+                    if same_size:
+                        if not incoming_hash:
+                            incoming_hash = compute_content_hash(filepath)
+                        if incoming_hash and incoming_hash == compute_content_hash(dest_path):
+                            job.duplicates_skipped += 1
+                            job.processed_files += 1
+                            log_msg = f"Duplicate skipped: {filename} (Matches existing: {dest_path})"
+                            job.error_log.append(log_msg)
+                            logger.info(log_msg)
+                            continue
+                except OSError:
+                    pass
 
-            moves.append((filepath, dest_path, label, is_unknown))
+            moves.append((filepath, dest_path, label, is_unknown, incoming_hash))
             if is_unknown:
                 job.unknown_date += 1
 
+            # Later files in this same import are checked against this one too
+            if fsize is not None:
+                existing_sizes.setdefault(fsize, []).append(
+                    {"id": None, "content_hash": incoming_hash, "path": filepath, "type": "incoming"}
+                )
+
+        # Keep the content hashes computed above for the next import
+        db.commit()
         job.progress = 25
 
         # ── Phase 3: Moving files (25–85%) ──
         job.phase = "Moving files..."
         logger.info(f"Import [{job.id}]: Moving {len(moves)} files (skipping {job.duplicates_skipped} duplicates)...")
 
+        imported_paths = []  # [(final_path, content_hash or None)]
         move_range = 60  # 25% → 85%
-        for i, (src, dest, label, is_unknown) in enumerate(moves):
+        for i, (src, dest, label, is_unknown, content_hash) in enumerate(moves):
             filename = os.path.basename(src)
 
             try:
-                # Create destination directory
-                dest_dir = os.path.dirname(dest)
-                os.makedirs(dest_dir, exist_ok=True)
-
-                # Handle filename collision (shouldn't happen after dup check, but be safe)
-                final_dest = dest
-                if os.path.exists(final_dest):
-                    base, ext = os.path.splitext(filename)
-                    counter = 1
-                    while os.path.exists(final_dest):
-                        final_dest = os.path.join(dest_dir, f"{base}_{counter}{ext}")
-                        counter += 1
-
-                # Move the file
-                shutil.move(src, final_dest)
+                # Move the file; never overwrite: a taken name gets a _1, _2... suffix
+                final_dest = claim_unique_path(src, os.path.dirname(dest), filename)
+                imported_paths.append((final_dest, content_hash))
                 job.imported += 1
                 logger.debug(f"  MOVED: {filename} → {label}/")
 
@@ -582,11 +643,11 @@ def _run_import(source_dir: str, job: ImportJob):
         job.phase = "Indexing new media..."
         job.progress = 85
         job.status = "indexing"
-        logger.info(f"Import [{job.id}]: Triggering Synaps indexer...")
+        logger.info(f"Import [{job.id}]: Indexing {len(imported_paths)} imported files...")
 
         try:
-            stats = scan_directory(db)
-            logger.info(f"Import [{job.id}]: Indexing complete: {stats}")
+            indexed = _index_imported_files(db, imported_paths)
+            logger.info(f"Import [{job.id}]: Indexed {indexed} files")
         except Exception as e:
             logger.error(f"Import [{job.id}]: Indexing error: {e}")
             job.error_log.append(f"Indexing: {str(e)}")

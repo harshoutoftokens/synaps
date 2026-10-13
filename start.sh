@@ -3,6 +3,7 @@
 # Starts both backend and frontend
 
 set -e
+cd "$(dirname "$0")"
 
 echo "🧠 Starting Synaps..."
 echo ""
