@@ -1,8 +1,17 @@
 import SwiftUI
 
 public struct MainTabView: View {
+    /// Shared by every tab: the library is enumerated and filtered once, not once per tab.
     @StateObject private var photosVM = PhotosViewModel()
-    @State private var selectedTab: Int = 0
+    @State private var selectedTab: Int = MainTabView.initialTab
+    
+    private static var initialTab: Int {
+        #if DEBUG
+        return UserDefaults.standard.integer(forKey: "SynapsInitialTab") // simulator test hook
+        #else
+        return 0
+        #endif
+    }
     
     public init() {}
     
@@ -18,7 +27,7 @@ public struct MainTabView: View {
                 .tabItem {
                     Label("Uncommitted", systemImage: "arrow.up.circle.fill")
                 }
-                .badge(photosVM.uncommittedCount > 0 ? photosVM.uncommittedCount : 0)
+                .badge(photosVM.uncommittedCount)
                 .tag(1)
             
             NASVaultView()
@@ -33,8 +42,9 @@ public struct MainTabView: View {
                 }
                 .tag(3)
         }
-        .onAppear {
-            photosVM.refresh()
+        .environmentObject(photosVM)
+        .task {
+            await photosVM.initialLoad()
         }
     }
 }

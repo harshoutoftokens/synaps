@@ -22,7 +22,9 @@ Synaps iOS brings the elegance and speed of Apple Photos together with your priv
 ### 3. 🎯 Manual Selection & Synchronization (Matching Mac App)
 - **Select Mode**: Tap "Select" in the top bar to select individual photos, tap "Select All", or tap a date group.
 - **Floating Action Bar**: Glassmorphism bottom action bar shows selected count and provides a prominent **"Sync Selected to NAS"** button.
-- **Instant Deduplication Pre-Check**: Communicates with `POST /api/v2/ingest/check`. If a photo's SHA-256 already exists on your NAS, it is committed instantly with **zero bytes uploaded**!
+- **Instant Deduplication Pre-Check**: Communicates with `POST /api/v2/ingest/check` (≤200 files per request). If a photo's SHA-256 already exists on your NAS, it is committed instantly with **zero bytes uploaded**!
+- **Streaming uploads**: originals are exported to a staging file, hashed in 4 MB chunks (hash cached per asset/resource size/modification date) and uploaded with `PUT /api/v2/ingest/stream` straight from disk through a background `URLSession` (keeps going while the app is suspended; at most 2 connections to the NAS). Falls back to multipart `POST /api/v2/ingest/upload` on servers without the stream endpoint.
+- **What gets backed up**: the unmodified original, the Live Photo motion video, RAW companions, and (optional) edited renders saved as `IMG_E1234.*`.
 
 ### 4. 🗂️ Uncommitted Staging Tab
 - A dedicated staging view showing all pending photos awaiting NAS commit.
@@ -54,18 +56,24 @@ clients/ios/SynapsiOS/
 │   ├── Info.plist                            # Photos, Local Network & Background permissions
 │   └── SynapsiOS.entitlements                # Wi-Fi network entitlements
 └── Sources/
-    ├── SynapsiOSApp.swift                    # App lifecycle & BGTask scheduler registration
+    ├── SynapsiOSApp.swift                    # App lifecycle (scene phase → BG scheduling / auto-sync)
+    ├── AppDelegate.swift                     # BGTask registration, background-URLSession relaunch events
     ├── Models/
     │   ├── Config.swift                      # NAS URL, device ID, Wi-Fi auto-sync settings
     │   ├── SyncStatus.swift                  # Committed (green), Uncommitted (red), Syncing, Failed
     │   ├── SynapsMediaItem.swift             # PHAsset representation, metadata, SHA-256, status
     │   ├── SyncActivityItem.swift            # Audit log entry model
+    │   ├── AssetPart.swift                   # Uploadable parts of an asset (original, Live video, RAW, edit)
     │   └── NASBrowseItem.swift               # NAS directory items & files
     ├── Services/
-    │   ├── PhotoLibraryService.swift         # PhotoKit bridge & PHPhotoLibraryChangeObserver
+    │   ├── PhotoLibraryService.swift         # PhotoKit bridge, cached enumeration, change observer
+    │   ├── AssetExporter.swift               # PHAssetResource -> staging file + SHA-256 (iCloud aware)
     │   ├── HashEngine.swift                  # Low-RAM streaming SHA-256 hashing
     │   ├── LocalCacheStore.swift             # High-speed SQLite state store (synaps_ios_state.db)
-    │   ├── NASClient.swift                   # Pre-check dedup, streaming upload, health check
+    │   ├── NASClient.swift                   # Request building (API token), pre-check, health, browse
+    │   ├── UploadSessionManager.swift        # Background URLSession uploads (stream + multipart)
+    │   ├── NASThumbnailLoader.swift          # Authenticated vault thumbnails (202 retry, caches)
+    │   ├── APITokenStore.swift               # Optional NAS API token in the Keychain
     │   ├── NetworkMonitor.swift              # NWPathMonitor Wi-Fi vs Cellular watcher
     │   ├── BackgroundSyncWorker.swift        # BackgroundTasks scheduler & Wi-Fi auto-sync handler
     │   └── SyncManager.swift                 # Synchronization pipeline coordinator
@@ -81,6 +89,7 @@ clients/ios/SynapsiOS/
         │   ├── MediaBadgeView.swift          # Green tick / Red cross indicator
         │   ├── DateSectionHeader.swift       # Sticky date section header
         │   ├── SelectionActionBar.swift      # Floating bottom selection toolbar
+        │   ├── SyncProgressBanner.swift      # Sync progress / last problem banner
         │   └── PhotoDetailView.swift         # Full screen viewer & EXIF/hash inspector
         ├── Uncommitted/
         │   └── UncommittedStagingView.swift  # Dedicated staging tab for uncommitted photos
@@ -105,9 +114,14 @@ Select your iPhone or a Simulator as the run target, and press **Cmd + R** to bu
 
 ### Connecting to your NAS
 1. In the app, switch to the **Settings** tab.
-2. Enter your Synaps NAS URL (default: `http://192.168.0.105:8000`).
+2. Enter your Synaps NAS URL (default: `http://192.168.0.105:8000`). If the server sets `SYNAPS_API_TOKEN`, enter the same value under **API Token** (stored in the Keychain, sent as `Authorization: Bearer`).
 3. Tap **"Test Connection"**. The status indicator will turn 🟢 **Connected**.
 4. Grant Photo Library access when prompted on first launch.
 5. All your photos will display with their status:
    - 🔴 **Red cross** for uncommitted photos.
    - 🟢 **Green tick** for photos that already exist in the NAS vault.
+
+### Simulator testing (Debug builds only)
+Launch arguments let you test against a local mock server instead of the NAS:
+`-SynapsNASURLOverride http://127.0.0.1:8765`, `-SynapsSeedAPIToken <token>` (stores it in the Keychain),
+`-SynapsSyncAllOnLaunch YES` (commits every uncommitted item once the library loads).

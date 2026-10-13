@@ -2,7 +2,9 @@ import SwiftUI
 import Photos
 
 public struct PhotosGridView: View {
-    @StateObject private var viewModel = PhotosViewModel()
+    @EnvironmentObject private var viewModel: PhotosViewModel
+    @Environment(\.displayScale) private var displayScale
+    @State private var detailItem: SynapsMediaItem? = nil
     
     private var gridSpacing: CGFloat { 1.5 }
     
@@ -34,7 +36,7 @@ public struct PhotosGridView: View {
                         Spacer()
                         
                         if viewModel.isSyncing {
-                            syncProgressBanner
+                            SyncProgressBanner()
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         } else if viewModel.isSelectionMode {
                             SelectionActionBar(
@@ -46,18 +48,29 @@ public struct PhotosGridView: View {
                                 onSyncSelected: { viewModel.syncSelectedItems() }
                             )
                             .transition(.move(edge: .bottom).combined(with: .opacity))
+                        } else if viewModel.syncStatusMessage != nil {
+                            SyncProgressBanner()
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
                 }
+                .onAppear {
+                    updateThumbnailPixelSize(itemSize)
+                }
+                .onChange(of: itemSize) { newSize in
+                    updateThumbnailPixelSize(newSize)
+                }
             }
             .navigationBarHidden(true)
-            .sheet(item: $viewModel.selectedItemForDetail) { item in
+            .sheet(item: $detailItem) { item in
                 PhotoDetailView(item: item)
             }
-            .onAppear {
-                viewModel.refresh()
-            }
         }
+    }
+    
+    private func updateThumbnailPixelSize(_ itemSize: CGFloat) {
+        let side = (itemSize * displayScale).rounded()
+        viewModel.thumbnailPixelSize = CGSize(width: side, height: side)
     }
     
     // MARK: - Continuous Timeline Grid
@@ -85,8 +98,9 @@ public struct PhotosGridView: View {
                         .frame(height: topOffset)
                     
                     // One Continuous Timeline Grid — No day or section breaks!
+                    // Iterate the cached array directly (stable ids; no per-render enumerated() copy).
                     LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
-                        ForEach(Array(viewModel.filteredItems.enumerated()), id: \.element.id) { index, item in
+                        ForEach(viewModel.filteredItems) { item in
                             MediaThumbnailCell(
                                 item: item,
                                 size: itemSize,
@@ -96,14 +110,14 @@ public struct PhotosGridView: View {
                                     viewModel.toggleSelection(for: item)
                                 },
                                 onTap: {
-                                    viewModel.selectedItemForDetail = item
+                                    detailItem = item
                                 }
                             )
                             .onAppear {
-                                viewModel.itemDidAppear(at: index, date: item.createdAt)
+                                viewModel.itemDidAppear(item.id)
                             }
                             .onDisappear {
-                                viewModel.itemDidDisappear(at: index)
+                                viewModel.itemDidDisappear(item.id)
                             }
                         }
                     }
@@ -112,7 +126,7 @@ public struct PhotosGridView: View {
             }
             .ignoresSafeArea(edges: .top)
             .refreshable {
-                viewModel.refresh()
+                await viewModel.refreshAsync()
             }
         }
     }
@@ -148,16 +162,11 @@ public struct PhotosGridView: View {
                         Divider()
                         
                         Section("Grid Size") {
-                            Button {
-                                viewModel.columnCount = 3
-                            } label: {
-                                Label("3 Columns (Large)", systemImage: viewModel.columnCount == 3 ? "checkmark" : "")
-                            }
-                            
-                            Button {
-                                viewModel.columnCount = 5
-                            } label: {
-                                Label("5 Columns (Compact)", systemImage: viewModel.columnCount == 5 ? "checkmark" : "")
+                            // Picker renders the checkmark itself (an empty systemImage name logs
+                            // "No symbol named ''" on every menu open).
+                            Picker("Grid Size", selection: $viewModel.columnCount) {
+                                Text("3 Columns (Large)").tag(3)
+                                Text("5 Columns (Compact)").tag(5)
                             }
                         }
                         
@@ -211,7 +220,9 @@ public struct PhotosGridView: View {
                 .padding(.top, 4)
             }
             .padding(.horizontal, 16)
-            .padding(.top, safeAreaTop > 0 ? safeAreaTop + 4 : 12)
+            // The header is laid out inside the safe area already (only its background ignores it);
+            // adding safeAreaTop again pushed it down over the grid's first row.
+            .padding(.top, safeAreaTop > 0 ? 4 : 12)
             .padding(.bottom, 16)
         }
         .background(
@@ -245,49 +256,6 @@ public struct PhotosGridView: View {
             }
             .ignoresSafeArea(edges: .top)
         )
-    }
-    
-    // MARK: - Sync Progress Banner
-    private var syncProgressBanner: some View {
-        VStack(spacing: 8) {
-            HStack {
-                ProgressView()
-                    .scaleEffect(0.85)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Syncing to Synaps NAS...")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.primary)
-                    Text(viewModel.syncItemName)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-                
-                Spacer()
-                
-                Text("\(viewModel.syncedCount)/\(viewModel.totalToSyncCount)")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.secondary)
-                
-                Button("Cancel") {
-                    viewModel.cancelSync()
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.red)
-                .padding(.leading, 8)
-            }
-            
-            ProgressView(value: viewModel.syncProgress)
-                .accentColor(.blue)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
-        .cornerRadius(14)
-        .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 4)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
     }
     
     private var emptyStateView: some View {
