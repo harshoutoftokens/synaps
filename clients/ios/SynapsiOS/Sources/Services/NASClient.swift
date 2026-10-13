@@ -42,6 +42,32 @@ public struct IngestCheckBatchResponse: Codable, Sendable {
     public let results: [IngestCheckItemResult]
 }
 
+/// One file to look up with POST /api/v2/ingest/match.
+public struct IngestMatchFile: Codable, Sendable, Hashable {
+    public let filename: String
+    public let size: Int64
+    
+    public init(filename: String, size: Int64) {
+        self.filename = filename
+        self.size = size
+    }
+}
+
+/// A file the NAS already holds (uploaded from any device), with its content hash.
+public struct IngestMatch: Codable, Sendable {
+    public let filename: String
+    public let size: Int64
+    public let sha256: String
+}
+
+private struct IngestMatchRequest: Codable {
+    let files: [IngestMatchFile]
+}
+
+private struct IngestMatchResponse: Codable {
+    let matches: [IngestMatch]
+}
+
 /// Response of POST /api/v2/ingest/upload and PUT /api/v2/ingest/stream (only the fields we use).
 public struct IngestUploadResponse: Decodable, Sendable {
     public let status: String?
@@ -357,6 +383,20 @@ public final class NASClient: @unchecked Sendable {
         let (data, response) = try await session.data(for: request)
         try Self.validate(response, data: data)
         return try JSONDecoder().decode(IngestCheckBatchResponse.self, from: data)
+    }
+    
+    /// Largest batch the server accepts for `matchExisting`.
+    public static let maxMatchBatchSize = 2000
+    
+    /// POST /api/v2/ingest/match — which of these (file name, size) pairs the NAS already has,
+    /// from any device. Read-only on the server. Older servers answer 404.
+    public func matchExisting(_ files: [IngestMatchFile]) async throws -> [IngestMatch] {
+        var request = try makeRequest(path: "/api/v2/ingest/match", method: "POST", timeout: 120)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(IngestMatchRequest(files: files))
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response, data: data)
+        return try JSONDecoder().decode(IngestMatchResponse.self, from: data).matches
     }
     
     /// Set once the server answered 404/405 to PUT /api/v2/ingest/stream; remembered for the

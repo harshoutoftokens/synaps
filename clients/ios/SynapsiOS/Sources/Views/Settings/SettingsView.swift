@@ -3,6 +3,7 @@ import SwiftUI
 public struct SettingsView: View {
     @StateObject private var settingsVM = SettingsViewModel()
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var reconciler = NASReconciler.shared
     @EnvironmentObject private var photosVM: PhotosViewModel
     @State private var showActivityLog = false
     
@@ -172,6 +173,30 @@ public struct SettingsView: View {
                         Text("\(photosVM.uncommittedCount)")
                             .foregroundColor(.red)
                             .fontWeight(.semibold)
+                    }
+                }
+                
+                // Photos that reached the NAS another way (e.g. through the Mac)
+                Section(footer: Text("Marks photos and videos the NAS already has, for example ones you uploaded from your Mac, as committed. Matches by file name and size; nothing is uploaded. Runs automatically every few hours.")) {
+                    Button {
+                        Task { await reconciler.reconcile() }
+                    } label: {
+                        HStack {
+                            Image(systemName: "externaldrive.badge.checkmark")
+                                .foregroundColor(.green)
+                            Text("Find Photos Already on NAS")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            if reconciler.isRunning {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(reconciler.isRunning)
+                    if let result = reconciler.lastResult {
+                        Text(result)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
                     }
                 }
                 

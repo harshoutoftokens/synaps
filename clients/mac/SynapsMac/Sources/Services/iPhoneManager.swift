@@ -43,6 +43,8 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     /// Coalesces the burst of didAdd callbacks while the phone's catalog loads.
     private var pendingListUpdate: DispatchWorkItem?
     private var listGeneration = 0
+    /// Phone items already looked up on the NAS this session (main thread only).
+    private var nasMatchCheckedIds = Set<String>()
     
     public let importDirectoryURL: URL = {
         let pictures = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first
@@ -387,6 +389,7 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
                 guard generation == self.listGeneration else { return }
                 self.phoneMediaItems = items
                 self.detectedAlbums = albums
+                self.markItemsAlreadyOnNAS(items)
                 if let dev = self.connectedDevice {
                     self.connectedDevice = ConnectedPhoneInfo(
                         id: dev.id,
@@ -395,6 +398,62 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
                         transportType: dev.transportType,
                         totalItems: items.count
                     )
+                }
+            }
+        }
+    }
+    
+    // MARK: - Items already on the NAS
+    
+    /// Photos can reach the NAS without this view knowing (AirDropped to the Mac and synced from a
+    /// folder, uploaded by the iPhone app, ...). Ask the NAS which phone files it already has, by
+    /// file name and size, and remember those as committed. Runs on the main thread.
+    private func markItemsAlreadyOnNAS(_ items: [SynapsFileItem]) {
+        let unknown = items.filter { $0.syncStatus != .committed && $0.fileSize > 0 && !nasMatchCheckedIds.contains($0.id) }
+        guard !unknown.isEmpty else { return }
+        nasMatchCheckedIds.formUnion(unknown.map(\.id))
+        let lookups = unknown.map { (id: $0.id, file: IngestMatchFile(filename: $0.filename, size: $0.fileSize)) }
+        
+        Task.detached(priority: .utility) {
+            let matches: [IngestMatch]
+            do {
+                matches = try await NASClient.shared.matchExisting(Array(Set(lookups.map(\.file))))
+            } catch {
+                // NAS offline or an older server: look these items up again on the next refresh
+                print("⚠️ Could not match phone items with the NAS: \(error.localizedDescription)")
+                await MainActor.run { iPhoneManager.shared.nasMatchCheckedIds.subtract(lookups.map(\.id)) }
+                return
+            }
+            var shaByFile: [IngestMatchFile: String] = [:]
+            for match in matches {
+                shaByFile[IngestMatchFile(filename: match.filename, size: match.size)] = match.sha256
+            }
+            let now = Date().timeIntervalSince1970
+            var found: [String: String] = [:]
+            for lookup in lookups {
+                guard let sha = shaByFile[lookup.file] else { continue }
+                found[lookup.id] = sha
+                LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
+                    path: lookup.id,
+                    inode: 0,
+                    size: lookup.file.size,
+                    mtime: now,
+                    sha256: sha,
+                    lastSyncedAt: now,
+                    syncStatus: SyncStatus.committed.rawValue,
+                    album: nil,
+                    isFavorite: false
+                ))
+            }
+            guard !found.isEmpty else { return }
+            let matched = found
+            await MainActor.run {
+                let manager = iPhoneManager.shared
+                for i in manager.phoneMediaItems.indices {
+                    if let sha = matched[manager.phoneMediaItems[i].id] {
+                        manager.phoneMediaItems[i].syncStatus = .committed
+                        manager.phoneMediaItems[i].sha256 = sha
+                    }
                 }
             }
         }

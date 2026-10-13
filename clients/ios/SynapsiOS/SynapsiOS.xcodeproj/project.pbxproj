@@ -40,6 +40,7 @@
 		AA0000572C10000100000001 /* AssetExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000582C10000100000001 /* AssetExporter.swift */; };
 		AA0000592C10000100000001 /* UploadSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005A2C10000100000001 /* UploadSessionManager.swift */; };
 		AA00005B2C10000100000001 /* NASThumbnailLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005C2C10000100000001 /* NASThumbnailLoader.swift */; };
+		AA00006A2C10000100000001 /* NASReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00006B2C10000100000001 /* NASReconciler.swift */; };
 		AA00005D2C10000100000001 /* SyncProgressBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005E2C10000100000001 /* SyncProgressBanner.swift */; };
 /* End PBXBuildFile section */
 
@@ -80,6 +81,7 @@
 		AA0000582C10000100000001 /* AssetExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetExporter.swift; sourceTree = "<group>"; };
 		AA00005A2C10000100000001 /* UploadSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadSessionManager.swift; sourceTree = "<group>"; };
 		AA00005C2C10000100000001 /* NASThumbnailLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NASThumbnailLoader.swift; sourceTree = "<group>"; };
+		AA00006B2C10000100000001 /* NASReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NASReconciler.swift; sourceTree = "<group>"; };
 		AA00005E2C10000100000001 /* SyncProgressBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncProgressBanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -160,6 +162,7 @@
 				AA0000582C10000100000001 /* AssetExporter.swift */,
 				AA00005A2C10000100000001 /* UploadSessionManager.swift */,
 				AA00005C2C10000100000001 /* NASThumbnailLoader.swift */,
+				AA00006B2C10000100000001 /* NASReconciler.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -315,6 +318,7 @@
 				AA0000572C10000100000001 /* AssetExporter.swift in Sources */,
 				AA0000592C10000100000001 /* UploadSessionManager.swift in Sources */,
 				AA00005B2C10000100000001 /* NASThumbnailLoader.swift in Sources */,
+				AA00006A2C10000100000001 /* NASReconciler.swift in Sources */,
 				AA00005D2C10000100000001 /* SyncProgressBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -100,6 +100,15 @@ class CheckBatchRequest(BaseModel):
     files: List[CheckFileItem]
 
 
+class MatchFileItem(BaseModel):
+    filename: str
+    size: int
+
+
+class MatchRequest(BaseModel):
+    files: List[MatchFileItem]
+
+
 class AlbumSyncRequest(BaseModel):
     source_id: str
     album_name: str
@@ -710,6 +719,48 @@ def check_ingest_batch(req: CheckBatchRequest):
             _make_mirror(*job)
 
     return response
+
+
+MATCH_MAX_FILES = 2000
+
+
+def _match_files(db: Session, files: List[MatchFileItem]) -> List[dict]:
+    """(filename, size) pairs the NAS already holds, from any source, with a content hash."""
+    wanted = {(f.filename, f.size) for f in files if f.filename and f.size > 0}
+    names = sorted({name for name, _ in wanted})
+    found: Dict[Tuple[str, int], str] = {}
+    for chunk in _chunks(names):
+        rows = (
+            db.query(LogicalItem.original_filename, PhysicalObject.file_size, PhysicalObject.sha256)
+            .join(PhysicalObject, LogicalItem.physical_object_id == PhysicalObject.id)
+            .filter(LogicalItem.original_filename.in_(chunk))
+            .all()
+        )
+        for name, size, sha in rows:
+            if (name, size) in wanted and sha:
+                found.setdefault((name, size), sha)
+        # Files indexed by the scanner only (no v2 record) count too when their SHA-256 is known
+        rows = (
+            db.query(MediaFile.filename, MediaFile.file_size, MediaFile.content_hash)
+            .filter(MediaFile.filename.in_(chunk), MediaFile.content_hash.isnot(None))
+            .all()
+        )
+        for name, size, sha in rows:
+            if (name, size) in wanted:
+                found.setdefault((name, size), sha)
+    return [{"filename": name, "size": size, "sha256": sha} for (name, size), sha in found.items()]
+
+
+@router.post("/ingest/match")
+def match_existing_files(req: MatchRequest, db: Session = Depends(get_db)):
+    """
+    Read-only: which of these (file name, size) pairs are already on the NAS, uploaded from any
+    device. Clients use it to mark items as backed up without reading or uploading them, e.g.
+    iPhone photos that reached the NAS through the Mac.
+    """
+    if len(req.files) > MATCH_MAX_FILES:
+        raise HTTPException(status_code=413, detail=f"at most {MATCH_MAX_FILES} files per request")
+    return {"matches": _match_files(db, req.files)}
 
 
 # ── 2. Upload Receivers ───────────────────────────────────────────────────

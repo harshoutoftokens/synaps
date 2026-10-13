@@ -64,6 +64,32 @@ public struct IngestCheckItemResult: Codable, Sendable {
     }
 }
 
+/// One file to look up with POST /api/v2/ingest/match.
+public struct IngestMatchFile: Codable, Sendable, Hashable {
+    public let filename: String
+    public let size: Int64
+    
+    public init(filename: String, size: Int64) {
+        self.filename = filename
+        self.size = size
+    }
+}
+
+/// A file the NAS already holds (uploaded from any device), with its content hash.
+public struct IngestMatch: Codable, Sendable {
+    public let filename: String
+    public let size: Int64
+    public let sha256: String
+}
+
+private struct IngestMatchRequest: Codable {
+    let files: [IngestMatchFile]
+}
+
+private struct IngestMatchResponse: Codable {
+    let matches: [IngestMatch]
+}
+
 public struct IngestCheckBatchResponse: Codable, Sendable {
     public let source_id: String?
     public let status: String?
@@ -637,6 +663,31 @@ public final class NASClient: @unchecked Sendable {
             try Self.requireSuccess(http, data)
             return try JSONDecoder().decode(IngestCheckBatchResponse.self, from: data)
         }
+    }
+    
+    /// /api/v2/ingest/match requests carry at most this many files.
+    public static let maxMatchBatchSize = 2000
+    
+    /// POST /api/v2/ingest/match — which of these (file name, size) pairs the NAS already has,
+    /// from any device. Read-only on the server; older servers answer 404.
+    public func matchExisting(_ files: [IngestMatchFile]) async throws -> [IngestMatch] {
+        var matches: [IngestMatch] = []
+        var offset = 0
+        while offset < files.count {
+            let batch = Array(files[offset..<min(offset + Self.maxMatchBatchSize, files.count)])
+            offset += batch.count
+            var request = try makeRequest(path: "/api/v2/ingest/match", method: "POST", timeout: 120)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(IngestMatchRequest(files: batch))
+            let found = try await withRetries(maxAttempts: 3) {
+                let (data, response) = try await self.apiSession.data(for: request)
+                let http = try self.checkedHTTP(response)
+                try Self.requireSuccess(http, data)
+                return try JSONDecoder().decode(IngestMatchResponse.self, from: data).matches
+            }
+            matches.append(contentsOf: found)
+        }
+        return matches
     }
     
     // MARK: - Upload

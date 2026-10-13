@@ -226,6 +226,27 @@ final class NASClientTests: SynapsTestCase {
         XCTAssertTrue((firstFile?["source_modified_at"] as? String)?.hasSuffix("+00:00") ?? false)
     }
     
+    func testMatchExistingBatchesAndDecodesMatches() async throws {
+        StubURLProtocol.setHandler { req in
+            XCTAssertEqual(req.url.path, "/api/v2/ingest/match")
+            let files = (req.json?["files"] as? [[String: Any]]) ?? []
+            // the NAS "has" every file whose name ends in 0
+            let matches: [[String: Any]] = files.compactMap { f in
+                let name = f["filename"] as! String
+                return name.hasSuffix("0") ? ["filename": name, "size": f["size"] as! Int, "sha256": "sha-\(name)"] : nil
+            }
+            return .json(["matches": matches])
+        }
+        let files = (0..<2500).map { IngestMatchFile(filename: "IMG_\($0)", size: Int64(1000 + $0)) }
+        let matches = try await makeClient().matchExisting(files)
+        
+        let batches = StubURLProtocol.recorded.map { (($0.json?["files"] as? [Any]) ?? []).count }
+        XCTAssertEqual(batches, [2000, 500])
+        XCTAssertEqual(matches.count, 250)
+        XCTAssertEqual(matches.first?.sha256, "sha-IMG_0")
+        XCTAssertEqual(matches.first?.size, 1000)
+    }
+    
     func testBrowseAllPagesReusesTheFirstPage() async throws {
         func page(_ n: Int) -> [String: Any] {
             let count = n < 3 ? 1000 : 500
