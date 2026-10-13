@@ -1,0 +1,16 @@
+# Pull-based continuous deployment: fetch origin, deploy if CI passed, roll back on failure.
+[Unit]
+Description=Synaps auto-update (git pull + rebuild + restart)
+Wants=network-online.target
+After=network-online.target synaps-backend.service
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@ROOT@
+Environment=PATH=@PATH@
+ExecStart=@ROOT@/synaps update
+# Builds run at low priority so the NAS keeps serving files meanwhile
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=45min

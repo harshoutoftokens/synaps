@@ -1,0 +1,7 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    // Plain <img> on purpose: next/image would make the NAS's Core 2 Duo resize every thumbnail
+    "@next/next/no-img-element": "off"
+  }
+}

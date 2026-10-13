@@ -60,6 +60,18 @@ public struct SyncStatusBar: View {
                         Text("\(viewModel.fileItems.count) items")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                        
+                        if let transfer = viewModel.nasTransferMessage {
+                            Text("•")
+                                .font(.caption)
+                                .foregroundColor(.secondary.opacity(0.5))
+                            Text(transfer)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(transfer)
+                        }
                     }
                 } else if viewModel.isSyncing {
                     ProgressView()
@@ -103,6 +115,18 @@ public struct SyncStatusBar: View {
                         Text("\(viewModel.filteredItems.count) items")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                        
+                        if let summary = viewModel.lastSyncSummary {
+                            Text("•")
+                                .font(.caption)
+                                .foregroundColor(.secondary.opacity(0.5))
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundColor(summary.contains("failed") || summary.contains("stopped") ? .orange : .secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .help(summary)
+                        }
                     }
                 }
             }
@@ -139,6 +163,16 @@ public struct SyncStatusBar: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
+                    
+                    Button {
+                        viewModel.cancelSync()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Cancel sync (files already uploaded stay committed)")
+                    .accessibilityLabel("Cancel sync")
                 }
             }
             

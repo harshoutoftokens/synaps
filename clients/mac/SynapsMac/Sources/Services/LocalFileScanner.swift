@@ -2,8 +2,12 @@ import Foundation
 
 public final class LocalFileScanner: @unchecked Sendable {
     public static let shared = LocalFileScanner()
-    private let cacheStore = LocalCacheStore.shared
-    private let hashQueue = DispatchQueue(label: "com.synaps.hashqueue", qos: .utility)
+    private let cacheStore: LocalCacheStore
+    
+    /// Background hashing for the most recently scanned folder; superseded by the next scan so
+    /// navigating away from a folder full of large videos doesn't keep the disk busy.
+    private var hashTask: Task<Void, Never>?
+    private let hashTaskLock = NSLock()
     
     private let ignoreFiles: Set<String> = [
         ".ds_store", ".localized", ".git", "node_modules",
@@ -14,7 +18,18 @@ public final class LocalFileScanner: @unchecked Sendable {
         "tmp", "download", "part", "crdownload"
     ]
     
+    private static let resourceKeys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .creationDateKey, .isDirectoryKey]
+    
+    /// Called on the main queue with batches of newly hashed items.
     public var onItemsHashed: (([SynapsFileItem]) -> Void)?
+    
+    init(cacheStore: LocalCacheStore = .shared) {
+        self.cacheStore = cacheStore
+    }
+    
+    private func isIgnored(name: String, ext: String) -> Bool {
+        return ignoreFiles.contains(name.lowercased()) || ignoreExtensions.contains(ext)
+    }
     
     public func scanDirectory(
         directoryPath: String,
@@ -31,7 +46,7 @@ public final class LocalFileScanner: @unchecked Sendable {
                 // Shallow listing (immediate directory contents only, matching native Finder behavior)
                 guard let urls = try? fileManager.contentsOfDirectory(
                     at: url,
-                    includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey, .isDirectoryKey],
+                    includingPropertiesForKeys: Self.resourceKeys,
                     options: [.skipsHiddenFiles]
                 ) else {
                     continuation.resume(returning: [])
@@ -44,11 +59,11 @@ public final class LocalFileScanner: @unchecked Sendable {
                     let filename = fileURL.lastPathComponent
                     let ext = fileURL.pathExtension.lowercased()
                     
-                    if self.ignoreFiles.contains(filename.lowercased()) || self.ignoreExtensions.contains(ext) {
+                    if self.isIgnored(name: filename, ext: ext) {
                         continue
                     }
                     
-                    guard let resourceValues = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey, .isDirectoryKey]) else {
+                    guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(Self.resourceKeys)) else {
                         continue
                     }
                     
@@ -129,49 +144,87 @@ public final class LocalFileScanner: @unchecked Sendable {
                 // Return immediate results to UI in < 0.05 seconds!
                 continuation.resume(returning: results)
                 
-                // Compute hashes asynchronously one-by-one in background with autoreleasepool
-                if !itemsNeedingHash.isEmpty {
-                    self.hashQueue.async {
-                        var newlyHashed: [SynapsFileItem] = []
-                        for item in itemsNeedingHash {
-                            autoreleasepool {
-                                if let sha = HashEngine.computeSHA256(for: item.originalPath) {
-                                    let stat = (try? fileManager.attributesOfItem(atPath: item.originalPath))
-                                    let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
-                                    let cached = self.cacheStore.getRecord(for: item.originalPath)
-                                    let currentStatus = cached?.syncStatus ?? SyncStatus.uncommitted.rawValue
-                                    self.cacheStore.saveRecord(LocalCacheStore.CachedRecord(
-                                        path: item.originalPath,
-                                        inode: inode,
-                                        size: item.fileSize,
-                                        mtime: item.modifiedAt.timeIntervalSince1970,
-                                        sha256: sha,
-                                        lastSyncedAt: cached?.lastSyncedAt,
-                                        syncStatus: currentStatus,
-                                        album: item.albumName,
-                                        isFavorite: item.isFavorite
-                                    ))
-                                    
-                                    var updatedItem = item
-                                    updatedItem.sha256 = sha
-                                    if currentStatus == SyncStatus.committed.rawValue {
-                                        updatedItem.syncStatus = .committed
-                                    }
-                                    newlyHashed.append(updatedItem)
-                                }
-                            }
-                        }
-                        
-                        if !newlyHashed.isEmpty {
-                            DispatchQueue.main.async {
-                                self.onItemsHashed?(newlyHashed)
-                            }
-                        }
-                    }
-                }
+                // Hash in the background (replacing any hashing still running for a previous folder)
+                self.scheduleHashing(itemsNeedingHash)
             }
         }
     }
+    
+    // MARK: - Background hashing
+    
+    private func scheduleHashing(_ items: [SynapsFileItem]) {
+        hashTaskLock.lock()
+        defer { hashTaskLock.unlock() }
+        hashTask?.cancel()
+        hashTask = nil
+        guard !items.isEmpty else { return }
+        hashTask = Task.detached(priority: .utility) { [weak self] in
+            await self?.hashItems(items)
+        }
+    }
+    
+    /// Stops background hashing (e.g. when switching to the NAS or iPhone views).
+    public func cancelBackgroundHashing() {
+        scheduleHashing([])
+    }
+    
+    private func hashItems(_ items: [SynapsFileItem]) async {
+        let byPath = Dictionary(items.map { ($0.originalPath, $0) }, uniquingKeysWith: { first, _ in first })
+        let batcher = HashResultBatcher { [weak self] batch in
+            guard let scanner = self else { return }
+            DispatchQueue.main.async {
+                scanner.onItemsHashed?(batch)
+            }
+        }
+        _ = await HashEngine.computeSHA256s(for: items.map { $0.originalPath }) { [weak self] path, sha in
+            guard let self = self, let sha = sha, let item = byPath[path], !Task.isCancelled else { return }
+            batcher.add(self.persistHash(sha, for: item))
+        }
+        if !Task.isCancelled {
+            batcher.flush()
+        }
+    }
+    
+    /// Saves a freshly computed hash. A previously committed status only carries over when the
+    /// record describes the same content (same hash, or same size+mtime if no hash was stored);
+    /// an edited file must show up as uncommitted again.
+    private func persistHash(_ sha: String, for item: SynapsFileItem) -> SynapsFileItem {
+        let mtime = item.modifiedAt.timeIntervalSince1970
+        let stat = try? FileManager.default.attributesOfItem(atPath: item.originalPath)
+        let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
+        let cached = cacheStore.getRecord(for: item.originalPath)
+        
+        var sameContent = false
+        if let cached = cached {
+            if let oldSha = cached.sha256 {
+                sameContent = oldSha == sha
+            } else {
+                sameContent = cached.size == item.fileSize && abs(cached.mtime - mtime) < 1.0
+            }
+        }
+        let status = sameContent ? (cached?.syncStatus ?? SyncStatus.uncommitted.rawValue) : SyncStatus.uncommitted.rawValue
+        
+        cacheStore.saveRecord(LocalCacheStore.CachedRecord(
+            path: item.originalPath,
+            inode: inode,
+            size: item.fileSize,
+            mtime: mtime,
+            sha256: sha,
+            lastSyncedAt: sameContent ? cached?.lastSyncedAt : nil,
+            syncStatus: status,
+            album: item.albumName,
+            isFavorite: item.isFavorite
+        ))
+        
+        var updatedItem = item
+        updatedItem.sha256 = sha
+        if status == SyncStatus.committed.rawValue || (sameContent && cached?.lastSyncedAt != nil) {
+            updatedItem.syncStatus = .committed
+        }
+        return updatedItem
+    }
+    
+    // MARK: - Recursive scans
     
     public func scanDirectoryRecursively(
         directoryPath: String,
@@ -183,9 +236,12 @@ public final class LocalFileScanner: @unchecked Sendable {
         let url = SecurityBookmarkManager.shared.startAccessing(path: directoryPath)
         defer { SecurityBookmarkManager.shared.stopAccessing(path: directoryPath) }
         
+        let keys = CacheKeyMapper(root: url.path)
+        let records = cacheStore.records(under: url.path)
+        
         guard let enumerator = fileManager.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey, .isDirectoryKey],
+            includingPropertiesForKeys: Self.resourceKeys,
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else {
             return []
@@ -195,16 +251,20 @@ public final class LocalFileScanner: @unchecked Sendable {
             let filename = fileURL.lastPathComponent
             let ext = fileURL.pathExtension.lowercased()
             
-            if self.ignoreFiles.contains(filename.lowercased()) || self.ignoreExtensions.contains(ext) {
-                continue
-            }
-            
-            guard let resourceValues = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey, .isDirectoryKey]),
+            guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(Self.resourceKeys)),
                   let isDir = resourceValues.isDirectory else {
                 continue
             }
             
             if isDir {
+                // Don't descend into node_modules, venv, ... (matches the Python client)
+                if ignoreFiles.contains(filename.lowercased()) {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+            
+            if isIgnored(name: filename, ext: ext) {
                 continue
             }
             
@@ -218,7 +278,7 @@ public final class LocalFileScanner: @unchecked Sendable {
             var isFav = false
             var album: String? = nil
             
-            if let cached = self.cacheStore.getRecord(for: path) {
+            if let cached = records[keys.cacheKey(for: path)] {
                 if cached.size == size && abs(cached.mtime - mtime.timeIntervalSince1970) < 1.0 {
                     fileSHA = cached.sha256
                     if cached.lastSyncedAt != nil || cached.syncStatus == SyncStatus.committed.rawValue {
@@ -251,10 +311,28 @@ public final class LocalFileScanner: @unchecked Sendable {
         return results
     }
     
+    /// Off-main wrapper: recursive enumeration of a large tree must not block the UI.
+    public func scanDirectoryRecursivelyAsync(
+        directoryPath: String,
+        sourceLocation: String,
+        sourceId: String = "mac_harsh"
+    ) async -> [SynapsFileItem] {
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: self.scanDirectoryRecursively(
+                    directoryPath: directoryPath,
+                    sourceLocation: sourceLocation,
+                    sourceId: sourceId
+                ))
+            }
+        }
+    }
+    
     public func evaluateFolderSyncStatus(folderPath: String) -> SyncStatus {
         let url = SecurityBookmarkManager.shared.startAccessing(path: folderPath)
         defer { SecurityBookmarkManager.shared.stopAccessing(path: folderPath) }
         
+        let keys = CacheKeyMapper(root: url.path)
         let fileManager = FileManager.default
         guard let enumerator = fileManager.enumerator(
             at: url,
@@ -264,32 +342,127 @@ public final class LocalFileScanner: @unchecked Sendable {
             return .uncommitted
         }
         
+        // Most folders contain an uncommitted file early on, so start with per-file lookups and only
+        // load every record under the folder (one range query) once the folder looks committed.
+        var records: [String: LocalCacheStore.CachedRecord]? = nil
         var fileCount = 0
         for case let fileURL as URL in enumerator {
-            guard let rv = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]),
-                  !(rv.isDirectory ?? false) else {
+            guard let rv = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]) else {
                 continue
             }
             
             let filename = fileURL.lastPathComponent
+            if rv.isDirectory ?? false {
+                if ignoreFiles.contains(filename.lowercased()) {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+            
             let ext = fileURL.pathExtension.lowercased()
-            if self.ignoreFiles.contains(filename.lowercased()) || self.ignoreExtensions.contains(ext) {
+            if isIgnored(name: filename, ext: ext) {
                 continue
             }
             
             fileCount += 1
+            if fileCount == 64 && records == nil {
+                records = cacheStore.records(under: url.path)
+            }
             let p = fileURL.path
             let size = Int64(rv.fileSize ?? 0)
-            let mtime = rv.contentModificationDate ?? Date()
+            let mtime = (rv.contentModificationDate ?? Date()).timeIntervalSince1970
             
-            guard let record = self.cacheStore.getRecord(for: p),
-                  (record.syncStatus == SyncStatus.committed.rawValue || record.lastSyncedAt != nil),
-                  record.size == size,
-                  abs(record.mtime - mtime.timeIntervalSince1970) < 1.0 else {
+            let record = records?[keys.cacheKey(for: p)] ?? cacheStore.getRecord(for: p)
+            guard let record = record, record.isCommitted(size: size, mtime: mtime) else {
                 return .uncommitted
             }
         }
         
         return fileCount > 0 ? .committed : .uncommitted
+    }
+    
+    /// Evaluates many folders off the main thread.
+    public func evaluateFolderSyncStatuses(folderPaths: [String]) async -> [String: SyncStatus] {
+        guard !folderPaths.isEmpty else { return [:] }
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var result: [String: SyncStatus] = [:]
+                for path in folderPaths {
+                    result[path] = self.evaluateFolderSyncStatus(folderPath: path)
+                }
+                continuation.resume(returning: result)
+            }
+        }
+    }
+}
+
+/// FileManager reports children under the fully resolved root ("/private/var/..."), while cache keys
+/// come from `LocalCacheStore.normalizePath` ("/var/..."), so a folder reached through a symlink
+/// would never match a bulk-loaded record. Maps enumerated paths onto cache keys by root prefix.
+private struct CacheKeyMapper {
+    private let enumeratedRoot: String
+    private let normalizedRoot: String
+    
+    init(root: String) {
+        var resolved = root
+        if let real = realpath(root, nil) {
+            resolved = String(cString: real)
+            free(real)
+        }
+        enumeratedRoot = resolved.hasSuffix("/") ? resolved : resolved + "/"
+        let normalized = LocalCacheStore.normalizePath(root)
+        normalizedRoot = normalized.hasSuffix("/") ? normalized : normalized + "/"
+    }
+    
+    func cacheKey(for enumeratedPath: String) -> String {
+        if enumeratedPath.hasPrefix(enumeratedRoot) {
+            return normalizedRoot + enumeratedPath.dropFirst(enumeratedRoot.count)
+        }
+        return LocalCacheStore.normalizePath(enumeratedPath)
+    }
+}
+
+/// Collects hashed items and hands them to the UI in batches (at most ~0.75 s latency) instead of
+/// once per file or only after the whole folder is done.
+private final class HashResultBatcher: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [SynapsFileItem] = []
+    private var flushScheduled = false
+    private let deliver: ([SynapsFileItem]) -> Void
+    private let maxBatch = 32
+    private let maxDelay: TimeInterval = 0.75
+    
+    init(deliver: @escaping ([SynapsFileItem]) -> Void) {
+        self.deliver = deliver
+    }
+    
+    func add(_ item: SynapsFileItem) {
+        lock.lock()
+        pending.append(item)
+        let shouldFlushNow = pending.count >= maxBatch
+        let shouldSchedule = !shouldFlushNow && !flushScheduled
+        if shouldSchedule {
+            flushScheduled = true
+        }
+        lock.unlock()
+        
+        if shouldFlushNow {
+            flush()
+        } else if shouldSchedule {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + maxDelay) { [weak self] in
+                self?.flush()
+            }
+        }
+    }
+    
+    func flush() {
+        lock.lock()
+        let batch = pending
+        pending.removeAll()
+        flushScheduled = false
+        lock.unlock()
+        if !batch.isEmpty {
+            deliver(batch)
+        }
     }
 }

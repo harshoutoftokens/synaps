@@ -168,7 +168,7 @@ perf: Switch thumbnail queue to LIFO for visible-first ordering
 `v1.0` will be tagged when all of the following are true:
 
 - [ ] The database schema has been stable for at least one minor version without breaking migrations
-- [ ] The `update.sh` script reliably updates the NAS without manual intervention
+- [ ] `./synaps update` (the auto-update timer) reliably updates the NAS without manual intervention
 - [ ] The application runs for 30+ days on the NAS without crashing or needing a restart
 - [ ] Background scans complete successfully and the timeline stays up to date
 - [ ] The Import Manager has been used for at least 3 full import cycles without data loss

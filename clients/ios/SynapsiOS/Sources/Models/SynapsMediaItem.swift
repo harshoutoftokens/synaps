@@ -16,6 +16,8 @@ public struct SynapsMediaItem: Identifiable, Hashable, Sendable {
     public var syncStatus: SyncStatus
     public var width: Int
     public var height: Int
+    /// Bytes of this asset's expected parts that are not yet on the NAS (0 when unknown).
+    public var pendingBytes: Int64
     
     public init(
         id: String,
@@ -31,7 +33,8 @@ public struct SynapsMediaItem: Identifiable, Hashable, Sendable {
         sha256: String? = nil,
         syncStatus: SyncStatus = .uncommitted,
         width: Int = 0,
-        height: Int = 0
+        height: Int = 0,
+        pendingBytes: Int64 = 0
     ) {
         self.id = id
         self.localIdentifier = localIdentifier
@@ -47,6 +50,7 @@ public struct SynapsMediaItem: Identifiable, Hashable, Sendable {
         self.syncStatus = syncStatus
         self.width = width
         self.height = height
+        self.pendingBytes = pendingBytes
     }
     
     public var originalPath: String {
@@ -67,10 +71,8 @@ public struct SynapsMediaItem: Identifiable, Hashable, Sendable {
     }
     
     public var formattedSize: String {
-        let bcf = ByteCountFormatter()
-        bcf.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
-        bcf.countStyle = .file
-        return bcf.string(fromByteCount: fileSize)
+        guard fileSize > 0 else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
     }
     
     public var formattedDimensions: String {

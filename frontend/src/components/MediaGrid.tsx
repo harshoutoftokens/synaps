@@ -1,12 +1,11 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import { getThumbnailUrl } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
 import { Play, Star } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
-interface MediaItem {
+export interface MediaItem {
   id: string;
   filename: string;
   media_type: string;
@@ -25,55 +24,84 @@ interface MediaGridProps {
   items: MediaItem[];
 }
 
-function MediaThumbnail({ item, index }: { item: MediaItem; index: number }) {
+const GAP = 3;
+
+// Same breakpoints / minimum tile sizes as the previous CSS `repeat(auto-fill, minmax(..))` grid
+function minTileSize(viewportWidth: number) {
+  if (viewportWidth >= 1280) return 180;
+  if (viewportWidth >= 1024) return 170;
+  if (viewportWidth >= 768) return 160;
+  if (viewportWidth >= 640) return 150;
+  return 140;
+}
+
+// Thumbnails that aren't generated yet come back as an SVG placeholder while the NAS queues
+// them. Re-check with backoff, then give up: files that can't be thumbnailed would otherwise be
+// re-queued (and re-fail, e.g. a 25 s ffmpeg timeout) every few seconds while the page is open.
+const THUMB_POLL_DELAYS = [2000, 3000, 5000, 8000, 13000, 21000];
+// ±20% so a screenful of tiles mounted together doesn't poll in lockstep
+const jitter = (ms: number) => ms * (0.8 + Math.random() * 0.4);
+
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+interface MediaThumbnailProps {
+  item: MediaItem;
+  top: number;
+  left: number;
+  size: number;
+  onOpen: (id: string) => void;
+}
+
+const MediaThumbnail = memo(function MediaThumbnail({ item, top, left, size, onOpen }: MediaThumbnailProps) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
-  const [imgSrc, setImgSrc] = useState(getThumbnailUrl(item.id));
-  const { openViewer } = useAppStore();
+  const [version, setVersion] = useState(0);
+  const favoriteOverride = useAppStore((s) => s.favoriteOverrides[item.id]);
+  const isFavorite = favoriteOverride ?? item.is_favorite;
+  const thumbUrl = getThumbnailUrl(item.id);
+  const src = version ? `${thumbUrl}?t=${version}` : thumbUrl;
 
-  // Poll for thumbnail if it wasn't ready when we fetched the timeline
+  // Poll for the thumbnail if it wasn't ready when we fetched the list. Tiles only exist while
+  // near the viewport (the grid is windowed) and polling waits for the placeholder to load.
   useEffect(() => {
-    let mounted = true;
-    let timeoutId: NodeJS.Timeout;
+    if (item.has_thumbnail || !loaded || error) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let attempt = 0;
 
-    if (!item.has_thumbnail) {
-      const checkThumbnail = async () => {
-        try {
-          const url = getThumbnailUrl(item.id);
-          const res = await fetch(url, { method: 'HEAD' });
-          if (!mounted) return;
-
-          const contentType = res.headers.get('content-type');
-          if (contentType && contentType.includes('svg')) {
-            // Still generating, poll again
-            timeoutId = setTimeout(checkThumbnail, 2500);
-          } else {
-            // Ready! Bust the cache to load the real WebP thumbnail
-            setImgSrc(`${url}?t=${Date.now()}`);
-          }
-        } catch (err) {
-          // Ignore network errors during polling
+    const check = async () => {
+      try {
+        const res = await fetch(thumbUrl, { method: 'HEAD' });
+        if (cancelled) return;
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && !contentType.includes('svg')) {
+          // Ready! Bust the cache to load the real WebP thumbnail
+          setVersion(Date.now());
+          return;
         }
-      };
-
-      // Start polling after a short delay
-      timeoutId = setTimeout(checkThumbnail, 2000);
-    }
-
-    return () => {
-      mounted = false;
-      if (timeoutId) clearTimeout(timeoutId);
+        if (res.status >= 400 && res.status < 500) return; // gone or unauthorized: stop
+      } catch {
+        if (cancelled) return;
+      }
+      attempt += 1;
+      if (attempt < THUMB_POLL_DELAYS.length) timer = setTimeout(check, jitter(THUMB_POLL_DELAYS[attempt]));
     };
-  }, [item.id, item.has_thumbnail]);
+
+    timer = setTimeout(check, jitter(THUMB_POLL_DELAYS[0]));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [item.has_thumbnail, loaded, error, thumbUrl]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ delay: Math.min(index * 0.01, 0.3), duration: 0.25 }}
+    <button
+      type="button"
       className="media-thumb group"
-      onClick={() => openViewer(item.id)}
+      style={{ top, left, width: size, height: size }}
+      onClick={() => onOpen(item.id)}
       data-date={item.date_string}
+      aria-label={item.filename}
     >
       {/* Skeleton */}
       {!loaded && !error && (
@@ -82,12 +110,14 @@ function MediaThumbnail({ item, index }: { item: MediaItem; index: number }) {
 
       {/* Thumbnail image */}
       <img
-        src={imgSrc}
-        alt={item.filename}
+        src={src}
+        alt=""
         loading="lazy"
+        decoding="async"
+        draggable={false}
         onLoad={() => setLoaded(true)}
         onError={() => { setError(true); setLoaded(true); }}
-        className={`transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        className={loaded && !error ? 'opacity-100' : 'opacity-0'}
       />
 
       {/* Error fallback */}
@@ -115,7 +145,7 @@ function MediaThumbnail({ item, index }: { item: MediaItem; index: number }) {
       )}
 
       {/* Favorite badge */}
-      {item.is_favorite && (
+      {isFavorite && (
         <div className="absolute top-1.5 right-1.5">
           <Star size={12} className="text-amber-400 drop-shadow-lg" fill="currentColor" />
         </div>
@@ -128,9 +158,9 @@ function MediaThumbnail({ item, index }: { item: MediaItem; index: number }) {
           {item.filename}
         </span>
       </div>
-    </motion.div>
+    </button>
   );
-}
+});
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -138,8 +168,81 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function MediaGrid({ items }: MediaGridProps) {
-  if (items.length === 0) {
+/**
+ * Windowed grid: only rows within about one screen of the viewport are mounted, so a library
+ * scrolled through thousands of items keeps a few hundred DOM nodes instead of tens of thousands.
+ */
+export const MediaGrid = memo(function MediaGrid({ items }: MediaGridProps) {
+  const deletedIds = useAppStore((s) => s.deletedMediaIds);
+  const openViewer = useAppStore((s) => s.openViewer);
+  const visibleItems = useMemo(
+    () => (deletedIds.size > 0 ? items.filter((i) => !deletedIds.has(i.id)) : items),
+    [items, deletedIds]
+  );
+  const itemsRef = useRef(visibleItems);
+  itemsRef.current = visibleItems;
+  const hasItems = visibleItems.length > 0;
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = useState({ cols: 0, size: 0 });
+  const [rows, setRows] = useState({ first: 0, last: -1 });
+
+  // Column count and tile size from the container width
+  useIsoLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const width = el.clientWidth;
+      if (!width) return;
+      const cols = Math.max(1, Math.floor((width + GAP) / (minTileSize(window.innerWidth) + GAP)));
+      const size = (width - GAP * (cols - 1)) / cols;
+      setLayout((prev) => (prev.cols === cols && Math.abs(prev.size - size) < 0.5 ? prev : { cols, size }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasItems]);
+
+  const rowHeight = layout.size + GAP;
+  const rowCount = layout.cols ? Math.ceil(visibleItems.length / layout.cols) : 0;
+
+  // Rows intersecting the viewport, plus one screen of overscan on each side
+  useIsoLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el || rowCount === 0) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const top = el.getBoundingClientRect().top;
+      const overscan = window.innerHeight;
+      const first = Math.max(0, Math.floor((-top - overscan) / rowHeight));
+      const last = Math.min(rowCount - 1, Math.floor((window.innerHeight - top + overscan) / rowHeight));
+      setRows((prev) => (prev.first === first && prev.last === last ? prev : { first, last }));
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    // Content above can move without a scroll event (months expanding, pages appended)
+    const observer = new ResizeObserver(schedule);
+    observer.observe(document.body);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+      observer.disconnect();
+    };
+  }, [rowCount, rowHeight]);
+
+  const handleOpen = useCallback(
+    (id: string) => openViewer(id, itemsRef.current.map((i) => i.id)),
+    [openViewer]
+  );
+
+  if (!hasItems) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <div className="w-14 h-14 rounded-2xl bg-[var(--glass-bg)] flex items-center justify-center mb-4 border border-[var(--glass-border)]">
@@ -151,11 +254,29 @@ export function MediaGrid({ items }: MediaGridProps) {
     );
   }
 
+  const { cols, size } = layout;
+  const start = cols ? rows.first * cols : 0;
+  const end = cols ? Math.min(visibleItems.length, (rows.last + 1) * cols) : 0;
+
   return (
-    <div className="media-grid">
-      {items.map((item, index) => (
-        <MediaThumbnail key={item.id} item={item} index={index} />
-      ))}
+    <div
+      ref={containerRef}
+      className="media-grid"
+      style={{ height: rowCount ? rowCount * rowHeight - GAP : 0 }}
+    >
+      {visibleItems.slice(start, end).map((item, k) => {
+        const index = start + k;
+        return (
+          <MediaThumbnail
+            key={item.id}
+            item={item}
+            top={Math.floor(index / cols) * rowHeight}
+            left={(index % cols) * (size + GAP)}
+            size={size}
+            onOpen={handleOpen}
+          />
+        );
+      })}
     </div>
   );
-}
+});

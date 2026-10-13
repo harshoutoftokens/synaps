@@ -63,6 +63,8 @@ def run_audit():
             if not chash:
                 # Dynamically compute it
                 chash = compute_content_hash(item.path)
+                if not chash:
+                    continue  # unreadable file: "" must not group unrelated files as duplicates
                 item.content_hash = chash
                 db.add(item)
                 

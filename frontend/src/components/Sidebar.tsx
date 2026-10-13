@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/lib/store';
-import { getStorageUsage } from '@/lib/api';
+import { getMediaStats } from '@/lib/api';
 import {
   LayoutGrid, Folder, Search, Upload, Trash2, Settings, X,
   Smartphone, Monitor, Laptop, Star, Camera
@@ -37,16 +37,19 @@ const utilityItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const {
-    sidebarOpen, setSidebarOpen,
-    activeFilter, setFilter,
-    activeSources, toggleSource,
-  } = useAppStore();
+  const sidebarOpen = useAppStore((s) => s.sidebarOpen);
+  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
+  const activeFilter = useAppStore((s) => s.activeFilter);
+  const setFilter = useAppStore((s) => s.setFilter);
+  const activeSources = useAppStore((s) => s.activeSources);
+  const toggleSource = useAppStore((s) => s.toggleSource);
 
   const [storageData, setStorageData] = useState<any>(null);
 
+  // /media/stats is cached and shared with the Library page. /settings/storage-usage would
+  // also walk the whole thumbnail cache on disk, on every page load.
   useEffect(() => {
-    getStorageUsage()
+    getMediaStats()
       .then(setStorageData)
       .catch(() => {});
   }, []);
@@ -107,6 +110,7 @@ export function Sidebar() {
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
+            aria-label="Close menu"
             className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--glass-bg-hover)] transition-colors"
           >
             <X size={16} className="text-[var(--text-tertiary)]" />
@@ -158,6 +162,7 @@ export function Sidebar() {
                 return (
                   <button
                     key={item.label}
+                    aria-pressed={active}
                     onClick={() => {
                       handleFilterClick(item.key);
                       // If we are applying a filter but not on the library page, navigate to library
@@ -186,6 +191,7 @@ export function Sidebar() {
               return (
                 <button
                   key={item.key}
+                  aria-pressed={active}
                   onClick={() => {
                     handleSourceClick(item.key);
                     // If we are applying a source filter but not on the library page, navigate to library
@@ -233,7 +239,7 @@ export function Sidebar() {
             </span>
             {storageData && (
               <span className="text-[10px] text-[var(--text-tertiary)]">
-                {storageData.total_indexed_human} indexed
+                {storageData.total_size_human} indexed
               </span>
             )}
           </div>

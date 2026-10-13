@@ -3,7 +3,7 @@ import SwiftUI
 public struct SettingsView: View {
     @StateObject private var settingsVM = SettingsViewModel()
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
-    @StateObject private var photosVM = PhotosViewModel()
+    @EnvironmentObject private var photosVM: PhotosViewModel
     @State private var showActivityLog = false
     
     public init() {}
@@ -19,12 +19,31 @@ public struct SettingsView: View {
                         Spacer()
                         TextField("http://192.168.0.105:8000", text: $settingsVM.config.nasUrl)
                             .multilineTextAlignment(.trailing)
-                            .autocapitalization(.none)
+                            .textInputAutocapitalization(.never)
                             .disableAutocorrection(true)
                             .keyboardType(.URL)
                             .onChange(of: settingsVM.config.nasUrl) { _ in
                                 settingsVM.saveConfig()
                             }
+                    }
+                    
+                    HStack {
+                        Text("API Token")
+                            .font(.system(size: 15))
+                        Spacer()
+                        SecureField("Optional", text: $settingsVM.apiToken)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .disableAutocorrection(true)
+                            .onChange(of: settingsVM.apiToken) { _ in
+                                settingsVM.saveToken()
+                            }
+                    }
+                    
+                    if settingsVM.tokenSaveFailed {
+                        Text("Couldn't save the token to the Keychain.")
+                            .font(.caption)
+                            .foregroundColor(.red)
                     }
                     
                     HStack {
@@ -89,25 +108,40 @@ public struct SettingsView: View {
                 }
                 
                 // Wi-Fi & Background Automation
-                Section(header: Text("Background Sync & Wi-Fi Automation"), footer: Text("When enabled, Synaps automatically discovers new photos taken on your iPhone and syncs them to your NAS when connected to Wi-Fi.")) {
+                Section(header: Text("Background Sync & Wi-Fi Automation"), footer: Text("When enabled, Synaps automatically uploads new photos while you're on Wi-Fi (not on cellular, personal hotspots or Low Data Mode). The background worker lets iOS continue while the app is closed. \"Favorites Only\" applies to automatic uploads; manual commits upload whatever you select.")) {
                     Toggle("Auto-Upload on Wi-Fi", isOn: $settingsVM.config.autoSyncOnWifi)
                         .onChange(of: settingsVM.config.autoSyncOnWifi) { _ in
-                            settingsVM.saveConfig()
+                            settingsVM.automationSettingsChanged()
                         }
                     
                     Toggle("Require Charging / Power", isOn: $settingsVM.config.requireCharging)
                         .onChange(of: settingsVM.config.requireCharging) { _ in
-                            settingsVM.saveConfig()
+                            settingsVM.automationSettingsChanged()
                         }
                     
                     Toggle("Enable Background Worker", isOn: $settingsVM.config.backgroundTaskEnabled)
                         .onChange(of: settingsVM.config.backgroundTaskEnabled) { _ in
-                            settingsVM.saveConfig()
+                            settingsVM.automationSettingsChanged()
                         }
                     
                     Toggle("Sync Favorites Only", isOn: $settingsVM.config.syncFavoritesOnly)
                         .onChange(of: settingsVM.config.syncFavoritesOnly) { _ in
                             settingsVM.saveConfig()
+                        }
+                    
+                    LabeledContent("Last Sync", value: settingsVM.lastSyncDescription)
+                }
+                
+                // What gets backed up per photo
+                Section(header: Text("Backup Contents"), footer: Text("The unmodified original is always uploaded. Edited versions are saved next to it as IMG_E1234 files.")) {
+                    Toggle("Live Photo Videos", isOn: $settingsVM.config.uploadLivePhotoVideos)
+                        .onChange(of: settingsVM.config.uploadLivePhotoVideos) { _ in
+                            settingsVM.backupContentsChanged()
+                        }
+                    
+                    Toggle("Edited Versions", isOn: $settingsVM.config.uploadEditedVersions)
+                        .onChange(of: settingsVM.config.uploadEditedVersions) { _ in
+                            settingsVM.backupContentsChanged()
                         }
                 }
                 
@@ -116,6 +150,7 @@ public struct SettingsView: View {
                     LabeledContent("Network Connection", value: networkMonitor.isConnected ? "Active" : "Disconnected")
                     LabeledContent("Interface", value: networkMonitor.isWifi ? "Wi-Fi (High Speed)" : (networkMonitor.isCellular ? "Cellular Data" : "None"))
                     LabeledContent("Metered / Expensive", value: networkMonitor.isExpensive ? "Yes" : "No")
+                    LabeledContent("Low Data Mode", value: networkMonitor.isConstrained ? "On" : "Off")
                 }
                 
                 // Photos Library & Vault Statistics
@@ -160,7 +195,7 @@ public struct SettingsView: View {
                 
                 // About
                 Section(header: Text("About")) {
-                    LabeledContent("App Version", value: "1.0.0 (Synaps iOS)")
+                    LabeledContent("App Version", value: settingsVM.appVersion)
                     LabeledContent("Engine", value: "Synaps v2 Atomic Vault")
                 }
             }
@@ -168,6 +203,10 @@ public struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showActivityLog) {
                 ActivityLogSheet(settingsViewModel: settingsVM)
+            }
+            .onAppear {
+                // Pick up fields changed elsewhere (e.g. last sync time) without discarding edits.
+                settingsVM.config.lastSyncTimestamp = SynapsConfig.load().lastSyncTimestamp
             }
         }
     }

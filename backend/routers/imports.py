@@ -51,24 +51,23 @@ def execute_import():
     Start a background import job.
     Returns the job ID immediately for progress polling.
     """
-    # Check if an import is already running
-    latest = ImportManager.get_latest_job()
-    if latest and latest.status not in ("complete", "error"):
-        return {
-            "status": "already_running",
-            "job_id": latest.id,
-            "phase": latest.phase,
-            "progress": latest.progress,
-        }
-
+    # Check if an import is already running (atomically with starting a new one)
     try:
-        job = ImportManager.execute()
-        return {
-            "status": "started",
-            "job_id": job.id,
-        }
+        job, started = ImportManager.execute_if_idle()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    if not started:
+        return {
+            "status": "already_running",
+            "job_id": job.id,
+            "phase": job.phase,
+            "progress": job.progress,
+        }
+    return {
+        "status": "started",
+        "job_id": job.id,
+    }
 
 
 @router.get("/progress/{job_id}")

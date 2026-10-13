@@ -6,11 +6,107 @@ import { useTheme } from 'next-themes';
 import { TopBar } from '@/components/TopBar';
 import { GlassPanel } from '@/components/glass/GlassPanel';
 import { GlassButton } from '@/components/glass/GlassButton';
-import { getSettings, updateSettings, getStorageUsage, triggerScan } from '@/lib/api';
+import {
+  getSettings, updateSettings, getStorageUsage, triggerScan,
+  getApiToken, setApiToken, isValidApiToken, verifyApiToken,
+} from '@/lib/api';
 import {
   HardDrive, Image, Film, FileText, Trash2,
-  RefreshCw, Moon, Sun, Monitor, FolderSearch, Loader2
+  RefreshCw, Moon, Sun, Monitor, FolderSearch, Loader2, KeyRound
 } from 'lucide-react';
+
+/** Optional API token (only needed when the server sets SYNAPS_API_TOKEN). */
+function ApiTokenSection() {
+  const [savedToken, setSavedToken] = useState<string | null>(null);
+  const [value, setValue] = useState('');
+  const [status, setStatus] = useState<{ tone: 'ok' | 'warn' | 'error'; text: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    setSavedToken(getApiToken());
+  }, []);
+
+  const check = async () => {
+    setChecking(true);
+    const result = await verifyApiToken();
+    setChecking(false);
+    if (result === 'ok') setStatus({ tone: 'ok', text: 'The server accepted this browser’s requests.' });
+    else if (result === 'rejected') setStatus({ tone: 'error', text: 'The server rejected the token.' });
+    else setStatus({ tone: 'warn', text: 'Couldn’t reach the server to verify the token.' });
+  };
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = value.trim();
+    if (!token) return;
+    if (!isValidApiToken(token)) {
+      setStatus({ tone: 'error', text: 'Tokens can’t contain spaces, quotes, commas, semicolons or backslashes.' });
+      return;
+    }
+    setApiToken(token);
+    setSavedToken(token);
+    setValue('');
+    await check();
+  };
+
+  const clear = () => {
+    setApiToken(null);
+    setSavedToken(null);
+    setStatus(null);
+  };
+
+  const statusColor = status?.tone === 'ok' ? 'text-emerald-400' : status?.tone === 'warn' ? 'text-amber-400' : 'text-red-400';
+
+  return (
+    <GlassPanel
+      as={motion.section as any}
+      variant="card"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.25 }}
+    >
+      <h2 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2 flex items-center gap-2">
+        <KeyRound size={16} className="text-[var(--accent)]" />
+        API Token
+      </h2>
+      <p className="text-[12px] text-[var(--text-tertiary)] mb-4">
+        Only needed if the server was started with <span className="font-mono">SYNAPS_API_TOKEN</span>.
+        Stored in a cookie in this browser.
+      </p>
+      <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+        <span className="text-[12px] text-[var(--text-secondary)] font-mono truncate">
+          {savedToken ? `••••••••${savedToken.slice(-4)}` : 'No token set'}
+        </span>
+        {savedToken && (
+          <div className="flex items-center gap-3 shrink-0">
+            <button onClick={check} disabled={checking} className="text-[12px] font-medium text-[var(--accent)] hover:underline disabled:opacity-50">
+              {checking ? 'Checking…' : 'Verify'}
+            </button>
+            <button onClick={clear} className="text-[12px] font-medium text-red-400 hover:underline">
+              Clear
+            </button>
+          </div>
+        )}
+      </div>
+      <form onSubmit={save} className="flex gap-2">
+        <input
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={value}
+          onChange={(e) => { setValue(e.target.value); setStatus(null); }}
+          placeholder={savedToken ? 'Replace token' : 'Paste token'}
+          aria-label="API token"
+          className="glass-input flex-1 min-w-0"
+        />
+        <GlassButton variant="accent" type="submit" disabled={!value.trim()}>
+          Save
+        </GlassButton>
+      </form>
+      {status && <p className={`text-[11px] mt-2 ${statusColor}`}>{status.text}</p>}
+    </GlassPanel>
+  );
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<any>({});
@@ -34,14 +130,16 @@ export default function SettingsPage() {
         getStorageUsage().then(setUsage).catch(console.error);
         setScanning(false);
       }, 3000);
-    } catch (err) {
+    } catch (err: any) {
       setScanning(false);
+      alert(`Couldn't start the scan: ${err.message || 'Unknown error'}`);
     }
   };
 
   const handleThemeChange = (newTheme: string) => {
     setTheme(newTheme);
-    updateSettings({ theme: newTheme });
+    // The theme itself lives in localStorage (next-themes); the server copy is best-effort
+    updateSettings({ theme: newTheme }).catch((err) => console.warn('Failed to save theme:', err));
   };
 
   const themes = [
@@ -172,6 +270,9 @@ export default function SettingsPage() {
             )}
           </GlassButton>
         </GlassPanel>
+
+        {/* API token */}
+        <ApiTokenSection />
 
         {/* Paths */}
         <GlassPanel

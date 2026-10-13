@@ -3,26 +3,53 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TopBar } from '@/components/TopBar';
-import { MediaGrid } from '@/components/MediaGrid';
+import { MediaGrid, type MediaItem } from '@/components/MediaGrid';
 import { useAppStore } from '@/lib/store';
 import { getMedia, getMediaStats } from '@/lib/api';
-import { ChevronRight, ChevronDown, LayoutGrid, List, Heart, Share2, Trash2, Grid3X3 } from 'lucide-react';
+import { AlertCircle, ChevronRight, Star } from 'lucide-react';
 
 interface TimelineGroup {
   year: number;
   month: number;
   month_name: string;
-  items: any[];
+  items: MediaItem[];
+}
+
+const groupKey = (g: { year: number; month: number }) => `${g.year}-${g.month}`;
+
+// Merge the next page into the month groups. Only groups that receive items get new objects,
+// so the (memoized) grids of every other month don't re-render.
+function mergeGroups(prev: TimelineGroup[], incoming: TimelineGroup[]): TimelineGroup[] {
+  const merged = prev.slice();
+  const indexByKey = new Map(merged.map((g, i) => [groupKey(g), i]));
+  for (const group of incoming) {
+    const i = indexByKey.get(groupKey(group));
+    if (i === undefined) {
+      if (group.items.length > 0) {
+        indexByKey.set(groupKey(group), merged.length);
+        merged.push(group);
+      }
+      continue;
+    }
+    const existingIds = new Set(merged[i].items.map((item) => item.id));
+    const newItems = group.items.filter((item) => !existingIds.has(item.id));
+    if (newItems.length > 0) merged[i] = { ...merged[i], items: merged[i].items.concat(newItems) };
+  }
+  merged.sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return b.month - a.month;
+  });
+  return merged;
 }
 
 export default function MediaBrowser() {
   // Data State
   const [timelineGroups, setTimelineGroups] = useState<TimelineGroup[]>([]);
-  const [galleryItems, setGalleryItems] = useState<any[]>([]);
+  const [galleryItems, setGalleryItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
 
   // Timeline Hierarchy State
@@ -33,20 +60,40 @@ export default function MediaBrowser() {
   // Gallery Sticky Date State
   const [activeDateHeader, setActiveDateHeader] = useState<string | null>(null);
 
-  const { activeFilter, activeView, activeSources } = useAppStore();
+  const activeFilter = useAppStore((s) => s.activeFilter);
+  const activeView = useAppStore((s) => s.activeView);
+  const activeSources = useAppStore((s) => s.activeSources);
   const observerRef = useRef<HTMLDivElement>(null);
 
-  const fetchPage = useCallback(async (pageNum: number, reset: boolean = false) => {
+  // Pagination bookkeeping lives in refs so the observer callback and late responses see
+  // current values. Every reset bumps the generation; responses from older ones are dropped
+  // (otherwise a slow page from the previous filter gets appended to the new results).
+  const generationRef = useRef(0);
+  const pageRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const hasMoreRef = useRef(true);
+  const groupsRef = useRef<TimelineGroup[]>([]);
+  groupsRef.current = timelineGroups;
+  const pageAddedGroupsRef = useRef(false);
+  const autoLoadsRef = useRef(0);
+
+  const fetchPage = useCallback(async (reset: boolean) => {
+    if (!reset && (inFlightRef.current || !hasMoreRef.current)) return;
+    const generation = reset ? ++generationRef.current : generationRef.current;
+    const pageNum = reset ? 1 : pageRef.current + 1;
+    inFlightRef.current = true;
     if (reset) {
       setLoading(true);
     } else {
       setLoadingMore(true);
     }
+    setError(null);
 
     try {
       const params: any = {
         page: pageNum,
-        per_page: activeView === 'gallery' ? 100 : 80,
+        // Timeline pages mostly land in collapsed months: bigger pages = fewer round trips
+        per_page: activeView === 'gallery' ? 100 : 200,
         view: activeView
       };
 
@@ -56,62 +103,50 @@ export default function MediaBrowser() {
       }
 
       const data = await getMedia(params);
+      if (generation !== generationRef.current) return;
 
       if (activeView === 'timeline') {
-        if (reset) {
-          setTimelineGroups(data.groups || []);
-        } else {
-          setTimelineGroups(prev => {
-            const merged = prev.map(g => ({ ...g, items: [...g.items] }));
-            for (const group of data.groups) {
-              const key = `${group.year}-${group.month}`;
-              const existing = merged.find(g => `${g.year}-${g.month}` === key);
-              if (existing) {
-                const existingIds = new Set(existing.items.map((i: any) => i.id));
-                const newItems = group.items.filter((item: any) => !existingIds.has(item.id));
-                existing.items.push(...newItems);
-              } else if (group.items.length > 0) {
-                merged.push({ ...group });
-              }
-            }
-            merged.sort((a, b) => {
-              if (a.year !== b.year) return b.year - a.year;
-              return b.month - a.month;
-            });
-            return merged;
-          });
-        }
+        const known = new Set(reset ? [] : groupsRef.current.map(groupKey));
+        pageAddedGroupsRef.current = (data.groups || []).some(
+          (g: TimelineGroup) => g.items.length > 0 && !known.has(groupKey(g))
+        );
+        setTimelineGroups((prev) => (reset ? data.groups || [] : mergeGroups(prev, data.groups || [])));
       } else {
-        // Gallery View
-        if (reset) {
-          setGalleryItems(data.items || []);
-        } else {
-          setGalleryItems(prev => {
-            const existingIds = new Set(prev.map(i => i.id));
-            const newItems = (data.items || []).filter((item: any) => !existingIds.has(item.id));
-            return [...prev, ...newItems];
-          });
-        }
+        setGalleryItems((prev) => {
+          if (reset) return data.items || [];
+          const existingIds = new Set(prev.map((i) => i.id));
+          const newItems = (data.items || []).filter((item: MediaItem) => !existingIds.has(item.id));
+          return [...prev, ...newItems];
+        });
       }
 
-      setHasMore(pageNum < data.total_pages);
-    } catch (error) {
-      console.error('Failed to fetch media:', error);
+      pageRef.current = pageNum;
+      hasMoreRef.current = pageNum < data.total_pages;
+      setHasMore(hasMoreRef.current);
+    } catch (err: any) {
+      if (generation !== generationRef.current) return;
+      console.error('Failed to fetch media:', err);
+      setError(err?.message || 'Failed to load media');
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (generation === generationRef.current) {
+        inFlightRef.current = false;
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [activeFilter, activeView, activeSources]);
 
   // Reset when filter, viewType, or sources change
   useEffect(() => {
-    setPage(1);
+    pageRef.current = 0;
+    hasMoreRef.current = true;
+    autoLoadsRef.current = 0;
     setTimelineGroups([]);
     setGalleryItems([]);
     setHasMore(true);
     setHasInitializedState(false);
-    fetchPage(1, true);
-  }, [activeFilter, activeView, activeSources]);
+    fetchPage(true);
+  }, [fetchPage]);
 
   useEffect(() => {
     getMediaStats().then(setStats).catch(console.error);
@@ -138,7 +173,7 @@ export default function MediaBrowser() {
   useEffect(() => {
     if (activeView === 'timeline' && yearGroups.length > 0 && !hasInitializedState) {
       const latestYear = yearGroups[0].year;
-      const latestMonthKey = `${yearGroups[0].months[0].year}-${yearGroups[0].months[0].month}`;
+      const latestMonthKey = groupKey(yearGroups[0].months[0]);
 
       const newCollapsedYears = new Set<number>();
       const newExpandedMonths = new Set<string>();
@@ -156,54 +191,81 @@ export default function MediaBrowser() {
     }
   }, [yearGroups, hasInitializedState, activeView]);
 
-  // Infinite scroll
+  // Infinite scroll: load the next page when the sentinel comes into view. The observer only
+  // reports transitions, so a page that doesn't push the sentinel out of view doesn't trigger
+  // another one by itself. That matters in the timeline: pages land in collapsed months, and
+  // re-firing until the screen filled up used to chain through the entire library.
   useEffect(() => {
-    if (!observerRef.current) return;
+    const el = observerRef.current;
+    if (!el) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
-          setPage(prev => {
-            const next = prev + 1;
-            fetchPage(next);
-            return next;
-          });
+        if (entries[0].isIntersecting) {
+          autoLoadsRef.current = 0;
+          fetchPage(false);
         }
       },
-      { threshold: 0.1 }
+      { rootMargin: '600px 0px' }
     );
-    observer.observe(observerRef.current);
+    observer.observe(el);
     return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, fetchPage]);
+  }, [fetchPage]);
 
-  // Sticky Date Observer
+  // Keep filling a tall viewport while pages visibly add content. A gallery page always adds a
+  // screenful of tiles; a timeline page only counts if it opened new month sections, and even
+  // then at most a few in a row.
   useEffect(() => {
-    if (timelineGroups.length === 0 && galleryItems.length === 0) return;
+    if (loading || loadingMore || !hasMore || error) return;
+    if (activeView === 'timeline' && (!pageAddedGroupsRef.current || autoLoadsRef.current >= 3)) return;
+    // Measure once the new content has laid out (grids size themselves after mount and the
+    // year sections animate open), or the page looks shorter than it is
+    const timer = setTimeout(() => {
+      const el = observerRef.current;
+      if (el && el.getBoundingClientRect().top < window.innerHeight + 600) {
+        autoLoadsRef.current += 1;
+        fetchPage(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [galleryItems, timelineGroups, activeView, loading, loadingMore, hasMore, error, fetchPage]);
 
-    const handleScroll = () => {
-      const elements = document.querySelectorAll('[data-date]');
-      let activeDate = null;
-
-      for (let i = 0; i < elements.length; i++) {
-        const rect = elements[i].getBoundingClientRect();
-        if (rect.top <= 140) {
-          activeDate = elements[i].getAttribute('data-date');
+  // Sticky date for the gallery: the date of the first tile row under the top bar
+  useEffect(() => {
+    if (activeView !== 'gallery' || galleryItems.length === 0) {
+      setActiveDateHeader(null);
+      return;
+    }
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const tiles = document.querySelectorAll<HTMLElement>('[data-date]');
+      if (tiles.length === 0) return;
+      // Tiles are in grid order, so their tops never decrease: binary search instead of
+      // measuring every tile on every scroll event
+      let lo = 0;
+      let hi = tiles.length - 1;
+      let found = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (tiles[mid].getBoundingClientRect().top <= 140) {
+          found = mid;
+          lo = mid + 1;
         } else {
-          break;
+          hi = mid - 1;
         }
       }
-
-      if (!activeDate && elements.length > 0) {
-        activeDate = elements[0].getAttribute('data-date');
-      }
-
-      setActiveDateHeader(activeDate);
+      setActiveDateHeader(tiles[found].getAttribute('data-date'));
     };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    setTimeout(handleScroll, 100);
-
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [timelineGroups, galleryItems]);
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    schedule();
+    window.addEventListener('scroll', schedule, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule);
+    };
+  }, [activeView, galleryItems]);
 
   const toggleYear = (year: number) => {
     setCollapsedYears(prev => {
@@ -223,16 +285,41 @@ export default function MediaBrowser() {
     });
   };
 
+  const isEmpty = !loading && !error && timelineGroups.length === 0 && galleryItems.length === 0;
+
   return (
     <div className="min-h-screen pb-24">
       <TopBar
         title="Library"
-        subtitle={activeDateHeader || (stats ? `${stats.total_files.toLocaleString()} items · ${stats.total_size_human}` : undefined)}
+        subtitle={activeDateHeader || (stats?.total_files != null ? `${stats.total_files.toLocaleString()} items · ${stats.total_size_human}` : undefined)}
         showViewControls
         showSourcesButton
       />
 
       <div className="px-4 lg:px-5 pb-8 mt-2">
+        {error && (
+          <div className="flex items-center gap-3 mb-6 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/15" role="alert">
+            <AlertCircle size={16} className="text-red-400 shrink-0" />
+            <p className="text-[12px] text-red-400 flex-1">Couldn&apos;t load your library: {error}</p>
+            <button
+              onClick={() => fetchPage(pageRef.current === 0)}
+              className="text-[12px] font-medium text-[var(--accent)] hover:underline shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {isEmpty && (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-[var(--glass-bg)] flex items-center justify-center mb-4 border border-[var(--glass-border)]">
+              <Star size={22} className="text-[var(--text-tertiary)]" />
+            </div>
+            <p className="text-sm text-[var(--text-secondary)]">No media found</p>
+            <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Try adjusting your filters</p>
+          </div>
+        )}
+
         {activeView === 'timeline' ? (
           /* ═══ TIMELINE VIEW ═══ */
           <div className="space-y-12">
@@ -245,16 +332,16 @@ export default function MediaBrowser() {
                   <div className="flex items-center gap-3 w-full group">
                     <button
                       onClick={() => toggleYear(yearGroup.year)}
-                      className="flex items-center gap-2.5 text-left shrink-0 focus:outline-none"
+                      aria-expanded={!yearCollapsed}
+                      className="flex items-center gap-2.5 text-left shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded-lg"
                     >
-                      <motion.div
-                        animate={{ rotate: yearCollapsed ? 0 : 90 }}
-                        transition={{ duration: 0.2 }}
-                        className="w-6 h-6 rounded-full bg-[var(--glass-bg-hover)] flex items-center justify-center
-                          group-hover:bg-[var(--glass-bg-active)] transition-colors"
+                      <div
+                        className={`w-6 h-6 rounded-full bg-[var(--glass-bg-hover)] flex items-center justify-center
+                          group-hover:bg-[var(--glass-bg-active)] transition duration-200
+                          ${yearCollapsed ? '' : 'rotate-90'}`}
                       >
                         <ChevronRight size={14} className="text-[var(--text-tertiary)]" />
-                      </motion.div>
+                      </div>
                       <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)]">
                         {yearGroup.year === 0 ? 'Old Photos' : yearGroup.year}
                       </h1>
@@ -276,22 +363,20 @@ export default function MediaBrowser() {
                         className="pl-2 lg:pl-4 space-y-4 overflow-hidden"
                       >
                         {yearGroup.months.map((group) => {
-                          const key = `${group.year}-${group.month}`;
+                          const key = groupKey(group);
                           const monthExpanded = expandedMonths.has(key);
 
                           return (
-                            <section key={key} style={{ contentVisibility: 'auto' }}>
+                            <section key={key}>
                               <button
                                 onClick={() => toggleMonth(key)}
+                                aria-expanded={monthExpanded}
                                 className="month-header py-1 flex items-center gap-2.5 group/month w-full text-left
-                                  focus:outline-none"
+                                  focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded-lg"
                               >
-                                <motion.div
-                                  animate={{ rotate: monthExpanded ? 90 : 0 }}
-                                  transition={{ duration: 0.2 }}
-                                >
+                                <div className={`transition-transform duration-200 ${monthExpanded ? 'rotate-90' : ''}`}>
                                   <ChevronRight size={14} className="text-[var(--text-tertiary)]" />
-                                </motion.div>
+                                </div>
                                 <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
                                   {group.year === 0 ? 'Archive' : group.month_name}
                                 </h2>
@@ -326,21 +411,26 @@ export default function MediaBrowser() {
         ) : (
           /* ═══ GALLERY VIEW ═══ */
           <div className="w-full">
-            <MediaGrid items={galleryItems} />
+            {galleryItems.length > 0 && <MediaGrid items={galleryItems} />}
           </div>
         )}
 
         {/* Loading Indicator & Infinite Scroll Target */}
         <div ref={observerRef} className="h-20 flex items-center justify-center mt-8">
           {(loading || loadingMore) && (
-            <div className="flex gap-2">
+            <div className="flex gap-2" aria-label="Loading">
               <div className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-bounce [animation-delay:-0.3s]" />
               <div className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-bounce [animation-delay:-0.15s]" />
               <div className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-bounce" />
             </div>
           )}
+          {hasMore && !loading && !loadingMore && !error && (timelineGroups.length > 0 || galleryItems.length > 0) && (
+            <button onClick={() => { autoLoadsRef.current = 0; fetchPage(false); }} className="glass-pill">
+              Load more
+            </button>
+          )}
           {!hasMore && !loading && (timelineGroups.length > 0 || galleryItems.length > 0) && (
-            <p className="text-[12px] text-[var(--text-tertiary)]">You've reached the end</p>
+            <p className="text-[12px] text-[var(--text-tertiary)]">You&apos;ve reached the end</p>
           )}
         </div>
       </div>

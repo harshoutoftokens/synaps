@@ -14,7 +14,8 @@ These systems are fully implemented and functional.
 - [x] **SQLite database** — Single-file via SQLAlchemy ORM; zero-config for NAS
 - [x] **Next.js proxy rewrite** — All `/api/*` requests forwarded to FastAPI; no CORS config needed
 - [x] **Configuration system** — `config.py` with full env var overrides (`SYNAPS_STORAGE_PATH`, etc.)
-- [x] **Setup & start scripts** — `setup.sh`, `start.sh`, `start-prod.sh`, `deploy.sh`, `update.sh`
+- [x] **Setup & start scripts** — one `./synaps` tool (install, dev, update, deploy) replacing the five shell scripts
+- [x] **Continuous deployment** — GitHub Actions CI + NAS auto-update timer with health-checked rollback
 - [x] **Mock storage** — Synthetic NAS directory tree for local development
 
 ### Media Scanner

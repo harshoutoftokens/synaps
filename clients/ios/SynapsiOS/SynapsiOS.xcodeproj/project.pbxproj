@@ -34,6 +34,13 @@
 		AA0000312C10000100000001 /* ActivityLogSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000322C10000100000001 /* ActivityLogSheet.swift */; };
 		AA0000332C10000100000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000342C10000100000001 /* SettingsView.swift */; };
 		AA0000352C10000100000001 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000362C10000100000001 /* MainTabView.swift */; };
+		AA0000512C10000100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000522C10000100000001 /* AppDelegate.swift */; };
+		AA0000532C10000100000001 /* AssetPart.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000542C10000100000001 /* AssetPart.swift */; };
+		AA0000552C10000100000001 /* APITokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000562C10000100000001 /* APITokenStore.swift */; };
+		AA0000572C10000100000001 /* AssetExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000582C10000100000001 /* AssetExporter.swift */; };
+		AA0000592C10000100000001 /* UploadSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005A2C10000100000001 /* UploadSessionManager.swift */; };
+		AA00005B2C10000100000001 /* NASThumbnailLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005C2C10000100000001 /* NASThumbnailLoader.swift */; };
+		AA00005D2C10000100000001 /* SyncProgressBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00005E2C10000100000001 /* SyncProgressBanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,6 +74,13 @@
 		AA0000362C10000100000001 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		AA0000372C10000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0000382C10000100000001 /* SynapsiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SynapsiOS.entitlements; sourceTree = "<group>"; };
+		AA0000522C10000100000001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		AA0000542C10000100000001 /* AssetPart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetPart.swift; sourceTree = "<group>"; };
+		AA0000562C10000100000001 /* APITokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APITokenStore.swift; sourceTree = "<group>"; };
+		AA0000582C10000100000001 /* AssetExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetExporter.swift; sourceTree = "<group>"; };
+		AA00005A2C10000100000001 /* UploadSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadSessionManager.swift; sourceTree = "<group>"; };
+		AA00005C2C10000100000001 /* NASThumbnailLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NASThumbnailLoader.swift; sourceTree = "<group>"; };
+		AA00005E2C10000100000001 /* SyncProgressBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncProgressBanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -97,6 +111,7 @@
 				AA00003F2C10000100000001 /* Services */,
 				AA0000402C10000100000001 /* ViewModels */,
 				AA0000412C10000100000001 /* Views */,
+				AA0000522C10000100000001 /* AppDelegate.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -126,6 +141,7 @@
 				AA0000082C10000100000001 /* SynapsMediaItem.swift */,
 				AA00000A2C10000100000001 /* SyncActivityItem.swift */,
 				AA00000C2C10000100000001 /* NASBrowseItem.swift */,
+				AA0000542C10000100000001 /* AssetPart.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -140,6 +156,10 @@
 				AA0000162C10000100000001 /* PhotoLibraryService.swift */,
 				AA0000182C10000100000001 /* SyncManager.swift */,
 				AA00001A2C10000100000001 /* BackgroundSyncWorker.swift */,
+				AA0000562C10000100000001 /* APITokenStore.swift */,
+				AA0000582C10000100000001 /* AssetExporter.swift */,
+				AA00005A2C10000100000001 /* UploadSessionManager.swift */,
+				AA00005C2C10000100000001 /* NASThumbnailLoader.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -175,6 +195,7 @@
 				AA0000282C10000100000001 /* SelectionActionBar.swift */,
 				AA00002A2C10000100000001 /* PhotoDetailView.swift */,
 				AA00002C2C10000100000001 /* PhotosGridView.swift */,
+				AA00005E2C10000100000001 /* SyncProgressBanner.swift */,
 			);
 			path = Photos;
 			sourceTree = "<group>";
@@ -288,6 +309,13 @@
 				AA0000312C10000100000001 /* ActivityLogSheet.swift in Sources */,
 				AA0000332C10000100000001 /* SettingsView.swift in Sources */,
 				AA0000352C10000100000001 /* MainTabView.swift in Sources */,
+				AA0000512C10000100000001 /* AppDelegate.swift in Sources */,
+				AA0000532C10000100000001 /* AssetPart.swift in Sources */,
+				AA0000552C10000100000001 /* APITokenStore.swift in Sources */,
+				AA0000572C10000100000001 /* AssetExporter.swift in Sources */,
+				AA0000592C10000100000001 /* UploadSessionManager.swift in Sources */,
+				AA00005B2C10000100000001 /* NASThumbnailLoader.swift in Sources */,
+				AA00005D2C10000100000001 /* SyncProgressBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
