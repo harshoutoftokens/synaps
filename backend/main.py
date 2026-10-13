@@ -2,6 +2,8 @@
 Synaps — Personal NAS Media OS
 Main FastAPI application entry point.
 """
+import socket
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -240,7 +242,8 @@ app.include_router(ingest_v2_router)
 @app.get("/api/health")
 @app.get("/health")
 def health():
-    return {"status": "ok", "app": "Synaps", "version": "1.0.0"}
+    # "name": the NAS's host name (e.g. "homecloud1"), shown by the apps instead of its IP address
+    return {"status": "ok", "app": "Synaps", "version": "1.0.0", "name": socket.gethostname().split(".")[0]}
 
 
 # HEAD for uptime monitors (kept out of the OpenAPI schema: same operation as GET)

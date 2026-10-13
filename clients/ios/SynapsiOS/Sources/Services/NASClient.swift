@@ -320,6 +320,9 @@ public final class NASClient: @unchecked Sendable {
         return ok
     }
     
+    /// UserDefaults key of the host name the NAS reported in its last health check.
+    public static let serverNameKey = "nasServerName"
+    
     private func probeHealth() async -> Bool {
         for path in ["/api/health", "/health"] {
             guard let request = try? makeRequest(path: path, timeout: 4) else { return false }
@@ -329,6 +332,10 @@ public final class NASClient: @unchecked Sendable {
                 if http.statusCode == 200,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    json["status"] as? String == "ok" {
+                    if let name = json["name"] as? String, !name.isEmpty {
+                        // The NAS's host name ("homecloud1"), shown instead of its IP (Lock Screen banner)
+                        UserDefaults.standard.set(name, forKey: Self.serverNameKey)
+                    }
                     return true
                 }
                 // Reachable but this path isn't the health endpoint (very old server): try the next one.

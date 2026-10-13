@@ -39,6 +39,8 @@
 	<string>Synaps requires permission to save photos and videos downloaded from your NAS back to your device.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Synaps accesses your photo library to display photos, indicate vault commit status with green ticks and red crosses, and sync your media with your Synaps NAS.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

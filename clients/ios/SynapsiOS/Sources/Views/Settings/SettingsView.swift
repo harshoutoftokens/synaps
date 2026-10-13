@@ -6,6 +6,7 @@ public struct SettingsView: View {
     @ObservedObject private var reconciler = NASReconciler.shared
     @EnvironmentObject private var photosVM: PhotosViewModel
     @State private var showActivityLog = false
+    @AppStorage("showSyncOnLockScreen") private var showSyncOnLockScreen = true
     
     public init() {}
     
@@ -129,6 +130,9 @@ public struct SettingsView: View {
                         .onChange(of: settingsVM.config.syncFavoritesOnly) { _ in
                             settingsVM.saveConfig()
                         }
+                    
+                    // Live Activity: a progress banner on the Lock Screen / in the Dynamic Island
+                    Toggle("Show Progress on Lock Screen", isOn: $showSyncOnLockScreen)
                     
                     LabeledContent("Last Sync", value: settingsVM.lastSyncDescription)
                 }
