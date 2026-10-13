@@ -1,0 +1,96 @@
+# CI for every push and pull request. The NAS only deploys a commit on main after every job
+# here has passed (./synaps update reads these check results from the GitHub API).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+      - name: pytest
+        working-directory: backend
+        run: python -m pytest -o addopts="" -q
+
+  web:
+    name: Web app lint + static build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - working-directory: frontend
+        run: npm run lint
+      - name: Static export (what the NAS serves)
+        working-directory: frontend
+        run: npm run build:static && test -f out/index.html
+
+  deploy-script:
+    name: Deploy tooling checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -S warning synaps clients/mac/SynapsMac/bundle_app.sh
+      - name: systemd unit syntax
+        run: |
+          mkdir -p /tmp/units
+          for f in deploy/systemd/*; do
+            sed -e "s#@USER@#$USER#g" -e "s#@ROOT@#$PWD#g" -e "s#@STORAGE@#/tmp#g" \
+                -e "s#@NPM@#/usr/bin/npm#g" -e "s#@PATH@#/usr/bin:/bin#g" "$f" > "/tmp/units/$(basename "$f")"
+          done
+          # backend venv does not exist in CI; verify only the unit file grammar
+          systemd-analyze verify /tmp/units/*.service /tmp/units/*.timer 2>&1 | grep -v "is not executable\|No such file\|Command .* not found\|Failed to prepare" | tee /tmp/verify.log
+          ! grep -qi "unknown\|invalid\|failed to parse" /tmp/verify.log
+
+  mac:
+    name: Mac client build + tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: clients/mac/SynapsMac
+        run: swift test
+
+  ios:
+    name: iPhone client build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: xcodebuild (simulator, unsigned)
+        working-directory: clients/ios/SynapsiOS
+        run: |
+          xcodebuild -project SynapsiOS.xcodeproj -scheme SynapsiOS \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build | tail -n 40
+          exit "${PIPESTATUS[0]}"

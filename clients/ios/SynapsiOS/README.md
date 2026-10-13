@@ -49,7 +49,6 @@ Synaps iOS brings the elegance and speed of Apple Photos together with your priv
 
 ```
 clients/ios/SynapsiOS/
-├── Package.swift                             # Swift Package configuration
 ├── SynapsiOS.xcodeproj/                      # Xcode project (double-click to open)
 │   └── project.pbxproj
 ├── Resources/

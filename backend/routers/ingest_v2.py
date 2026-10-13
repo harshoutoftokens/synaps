@@ -727,7 +727,7 @@ def upload_file_v2(
     file: UploadFile = File(...),
 ):
     """
-    Legacy multipart upload (Mac/iOS apps, synaps_mac.py). Runs in a worker thread.
+    Legacy multipart upload (fallback for Mac/iOS apps on servers without /stream). Runs in a worker thread.
     Starlette has already spooled the file part to a temp file; it is copied (and hashed)
     into the staging area once, then goes through the shared ingest pipeline.
     Prefer PUT /api/v2/ingest/stream: no multipart parsing and one disk write per byte.

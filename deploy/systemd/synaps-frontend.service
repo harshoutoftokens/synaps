@@ -1,0 +1,17 @@
+# Only used with SYNAPS_WEB_MODE=node. The default (static) mode serves the web app from the backend.
+[Unit]
+Description=Synaps web dashboard (Next.js server)
+After=network-online.target synaps-backend.service
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@ROOT@/frontend
+Environment=PATH=@PATH@
+Environment=NODE_ENV=production
+ExecStart=@NPM@ run start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

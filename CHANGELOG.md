@@ -5,6 +5,22 @@ Versions are grouped by major development milestone rather than individual commi
 
 ---
 
+## Unreleased – Cleanup & continuous deployment
+
+### Added
+- `./synaps` — one tool for install, dev, test, update, rollback, deploy, status, logs and doctor
+- GitHub Actions CI (`.github/workflows/ci.yml`): backend tests (Python 3.10/3.12), web lint + static build, deploy-script checks, Mac tests, iOS build
+- NAS auto-update: `synaps-update.timer` deploys new `main` commits after CI passes, with DB backup, health check and automatic rollback
+- `deploy/` templates: systemd units, a narrow sudoers rule, Bonjour (avahi) service for Mac/iPhone discovery
+
+### Removed
+- `setup.sh`, `start.sh`, `start-prod.sh`, `deploy.sh`, `update.sh`, `git_cheatsheet.md` (replaced by `./synaps`)
+- Legacy `clients/mac/synaps_mac.py` CLI (superseded by the Mac app; shared its state DB)
+- Orphaned `tests/test_sync_navigation.swift`, unused `clients/ios/SynapsiOS/Package.swift`
+- Ad-hoc `test_db.py` (root, broken), `backend/test_db.py`, `backend/test_heic.py` (now `./synaps doctor`)
+
+---
+
 ## v2.1 – Native iOS Photos Companion *(October 2026)*
 
 > Introduces the native iOS Photos client (`clients/ios/SynapsiOS`), bringing continuous timeline scrolling, automated Wi-Fi background backup, visual commit badging, and remote NAS vault exploration to iPhone devices.

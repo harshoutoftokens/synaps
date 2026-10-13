@@ -14,7 +14,7 @@ Browse, organize, stream, and synchronize your photos, videos, and files with ze
 [![SQLite](https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](backend/database.py)
 [![License](https://img.shields.io/badge/license-MIT_/_Personal-success?style=flat-square)](LICENSE)
 
-[Architecture](#-architecture) • [Features](#-key-features) • [Clients](#-ecosystem--clients) • [Quick Start](#-quick-start) • [Deployment](#-nas-deployment) • [Documentation](#-documentation)
+[Architecture](#-architecture) • [Features](#-key-features) • [Clients](#-ecosystem--clients) • [Quick Start](#-quick-start) • [Deployment](#-nas-deployment-cicd) • [Documentation](#-documentation)
 
 ---
 
@@ -120,112 +120,55 @@ Whether backing up direct USB imports from an iPhone via ImageCaptureCore, catal
   - macOS: `brew install ffmpeg`
   - Linux (Debian/Ubuntu): `sudo apt install ffmpeg`
 
-### 1. Installation
-
-Clone the repository and run the setup script:
+### 1. Development (your Mac)
 
 ```bash
 git clone https://github.com/harshoutoftokens/synaps.git
 cd synaps
-chmod +x *.sh
-./setup.sh
+./synaps dev      # backend on :8000 + web app on :3000, Ctrl+C stops both
+./synaps test     # backend tests, web lint/build, Mac client tests
 ```
 
-### 2. Configuration
+Backend settings (storage path, API token, owner name, …) live in `backend/.env`; copy
+[`backend/.env.example`](backend/.env.example) and uncomment what you need. Without it the backend
+serves the bundled `mock_storage/`.
 
-Create or edit your local environment configuration in `backend/config.py`:
-
-```python
-# Primary NAS Vault directory
-STORAGE_ROOT = "/storage/Vault"
-
-# Scan directories and device sources
-ALLOWED_SCAN_PATHS = ["/storage/Vault"]
-EXCLUDED_PATHS = ["@eaDir", ".DS_Store", "node_modules", ".Trash"]
-SOURCE_MAPPING = {
-    "Iphone": "iphone_harsh",
-    "Mac": "mac_harsh",
-    "Windows_laptop-HP": "win_laptop"
-}
-```
-
-### 3. Launch Development Servers
+### 2. Native clients
 
 ```bash
-./start.sh
+./synaps mac      # build SynapsMac.app and open it
+./synaps ios      # open the iPhone app in Xcode (pick your iPhone, set your Team, Run)
 ```
-
-- **Web Dashboard**: `http://localhost:3000`
-- **FastAPI Documentation**: `http://localhost:8000/docs`
-
-### 4. Running Native Clients
-
-- **macOS Companion (`SynapsMac`)**:
-  ```bash
-  cd clients/mac/SynapsMac && ./bundle_app.sh && open SynapsMac.app
-  ```
-- **iOS Photos Companion (`SynapsiOS`)**:
-  ```bash
-  open clients/ios/SynapsiOS/SynapsiOS.xcodeproj
-  ```
 
 ---
 
-## 🛠 NAS Deployment & Auto-Start
+## 🛠 NAS Deployment (CI/CD)
 
-For production headless NAS environments, launch both servers using production mode:
+One-time setup on the NAS (Ubuntu Server, over SSH):
 
 ```bash
-./start-prod.sh
+git clone https://github.com/harshoutoftokens/synaps.git ~/nas_dashboard
+cd ~/nas_dashboard
+./synaps install --storage /storage
 ```
 
-### Systemd Service Configuration (Linux NAS)
+`install` sets up packages (ffmpeg, avahi, Python venv), builds the web app, and installs systemd units:
+`synaps-backend` (API + web app on port 8000, waits for the storage disk) and `synaps-update.timer`.
+It also advertises the NAS over Bonjour (`<hostname>.local`, `_synaps._tcp`) so the Mac and iPhone apps find it.
 
-To ensure Synaps launches automatically on NAS reboot, install systemd service units:
+After that, deploying is just merging to `main`:
 
-**`/etc/systemd/system/synaps-backend.service`**
-```ini
-[Unit]
-Description=Synaps Backend Service
-After=network.target
+1. Every push and PR runs [CI](.github/workflows/ci.yml): backend tests, web build, Mac tests, iOS build.
+2. Every 5 minutes the NAS checks `origin/main`. When a new commit has passed CI it pulls it,
+   rebuilds only what changed, backs up the database, restarts, and health-checks.
+3. If anything fails, it rolls back to the previous version and skips that commit until a newer one lands.
 
-[Service]
-Type=simple
-User=nas-user
-WorkingDirectory=/opt/synaps/backend
-ExecStart=/opt/synaps/backend/venv/bin/python main.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**`/etc/systemd/system/synaps-frontend.service`**
-```ini
-[Unit]
-Description=Synaps Frontend Web Dashboard
-After=network.target synaps-backend.service
-
-[Service]
-Type=simple
-User=nas-user
-WorkingDirectory=/opt/synaps/frontend
-ExecStart=/usr/bin/npm run start
-Restart=always
-RestartSec=5
-Environment=PORT=3000
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start services:
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable synaps-backend synaps-frontend
-sudo systemctl start synaps-backend synaps-frontend
+./synaps deploy           # from your Mac: tell the NAS to update now (set SYNAPS_NAS=user@host)
+./synaps status | logs | doctor | rollback [rev]     # on the NAS
 ```
+
+See [docs/11 — Deployment & Services](docs/11_deployment_and_services.md) for details.
 
 ---
 

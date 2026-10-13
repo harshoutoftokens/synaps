@@ -102,3 +102,9 @@ DerivedData/
 *.dSYM/
 checkpoints/
 
+# Deploy state and the live static web app (./synaps)
+.synaps.local
+backend/.deploy/
+frontend/live/
+frontend/live.new/
+frontend/live.old/
