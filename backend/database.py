@@ -62,11 +62,58 @@ EXTRA_INDEXES = [
 ]
 
 
+def add_missing_columns(conn) -> list:
+    """Add model columns that an older database lacks (SQLite only, nullable columns only).
+
+    create_all() never alters existing tables, so a database created by an older release keeps
+    working only if every newer column is added here. Returns "table.column" for each one added.
+    """
+    added = []
+    if not IS_SQLITE:
+        return added
+    for table in Base.metadata.sorted_tables:
+        existing = {row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table.name}")')}
+        if not existing:
+            continue  # table was just created by create_all()
+        for column in table.columns:
+            if column.name in existing or column.primary_key or not column.nullable:
+                continue
+            col_type = column.type.compile(dialect=engine.dialect)
+            conn.exec_driver_sql(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}')
+            if column.index:
+                conn.exec_driver_sql(
+                    f'CREATE INDEX IF NOT EXISTS "ix_{table.name}_{column.name}" '
+                    f'ON "{table.name}" ("{column.name}")'
+                )
+            added.append(f"{table.name}.{column.name}")
+    return added
+
+
+def _fill_media_sources(conn):
+    """Fill media_files.source for rows that predate the column (same rule as the scanner)."""
+    from scanner import derive_source
+
+    rows = conn.exec_driver_sql(
+        "SELECT id, relative_path FROM media_files WHERE source IS NULL"
+    ).fetchall()
+    if rows:
+        conn.exec_driver_sql(
+            "UPDATE media_files SET source = ? WHERE id = ?",
+            [(derive_source(rel or ""), row_id) for row_id, rel in rows],
+        )
+
+
 def init_db():
-    """Create all tables (v1 and v2) and the extra indexes. Never alters existing tables."""
+    """Create all tables (v1 and v2), add columns missing from older databases, extra indexes."""
     from models import MediaFile, TrashItem, SyncRecord, Setting  # noqa: F401
     import models_v2  # noqa: F401  (registers the v2 tables on Base.metadata)
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
+        added = add_missing_columns(conn)
+        if "media_files.source" in added:
+            _fill_media_sources(conn)
         for statement in EXTRA_INDEXES:
             conn.exec_driver_sql(statement)
+    if added:
+        import logging
+        logging.getLogger("synaps.database").info("Added missing columns: %s", ", ".join(added))

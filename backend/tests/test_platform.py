@@ -298,3 +298,30 @@ def test_only_one_scan_runs_at_a_time(client, monkeypatch):
     release.clear()
     assert client.post("/api/scan").json() == {"status": "scan_started"}
     release.set()
+
+
+def test_init_db_adds_columns_missing_from_older_databases(tmp_path):
+    """A database from an older release (no media_files.source) is upgraded in place."""
+    from sqlalchemy import create_engine
+    import database
+
+    old = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with old.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE media_files (id INTEGER PRIMARY KEY, filename VARCHAR, path VARCHAR, relative_path VARCHAR)"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO media_files (id, filename, path, relative_path) VALUES "
+            "(1, 'a.jpg', '/s/Vault/Harsh/Iphone/a.jpg', 'Vault/Harsh/Iphone/a.jpg'), "
+            "(2, 'b.jpg', '/s/Vault/Harsh/Mac/b.jpg', 'Vault/Harsh/Mac/b.jpg')"
+        )
+    with old.begin() as conn:
+        added = database.add_missing_columns(conn)
+        database._fill_media_sources(conn)
+    assert "media_files.source" in added
+    with old.begin() as conn:
+        assert database.add_missing_columns(conn) == []  # idempotent
+        rows = dict(conn.exec_driver_sql("SELECT id, source FROM media_files").fetchall())
+        indexes = {r[1] for r in conn.exec_driver_sql("PRAGMA index_list(media_files)")}
+    assert rows == {1: "iphone", 2: "mac"}
+    assert "ix_media_files_source" in indexes
