@@ -24,6 +24,9 @@ Safety:
     - Never overwrites files (skips duplicates)
     - Ignores already-organized YYYY/MM subdirectories
     - Only processes the flat root of the Iphone folder
+    - Never touches Synaps v2 vault files (canonical objects, hardlinked/symlinked files,
+      anything under Mirrors/)
+    - Carries cached thumbnails along with moved files
 """
 
 import os
@@ -40,7 +43,11 @@ from pathlib import Path
 # We import directly to guarantee identical date logic.
 
 from config import ALLOWED_SCAN_PATHS, ALL_MEDIA_EXTENSIONS, STORAGE_PATH
-from scanner import get_best_date, extract_exif_date, extract_date_from_filename, extract_video_date
+from scanner import (
+    get_best_date, extract_exif_date, extract_date_from_filename, extract_video_date,
+    vault_protection_reason,
+)
+from thumbnails import move_thumbnail
 from database import SessionLocal
 from models import MediaFile
 
@@ -191,6 +198,7 @@ def organize(base_dir: str, dry_run: bool = True, update_db: bool = True) -> dic
         "moved": 0,
         "skipped_duplicate": 0,
         "skipped_already_organized": 0,
+        "skipped_vault": 0,
         "unknown_date": 0,
         "errors": 0,
         "by_source": {"EXIF DateTimeOriginal": 0, "Filename pattern": 0, "Filesystem mtime": 0, "No date found": 0},
@@ -223,10 +231,25 @@ def organize(base_dir: str, dry_run: bool = True, update_db: bool = True) -> dic
             db = SessionLocal()
         except Exception as e:
             logger.warning(f"Could not open DB session: {e}. Paths won't be updated.")
+    # Separate read-only session for the v2 vault check (also in dry-run / --no-db)
+    vault_db = None
+    try:
+        vault_db = SessionLocal()
+    except Exception as e:
+        logger.warning(f"Could not open DB session for vault checks: {e}")
 
     try:
         for i, filepath in enumerate(files, 1):
             filename = os.path.basename(filepath)
+
+            try:
+                vault_reason = vault_protection_reason(filepath, vault_db)
+            except OSError as e:
+                vault_reason = f"can't be inspected ({e})"
+            if vault_reason:
+                stats["skipped_vault"] += 1
+                logger.info(f"  [{i}/{len(files)}] SKIP (vault): {filename} {vault_reason}")
+                continue
 
             # Detect date using Synaps scanner logic
             date, source = detect_date_source(filepath, filename)
@@ -259,6 +282,7 @@ def organize(base_dir: str, dry_run: bool = True, update_db: bool = True) -> dic
                 try:
                     shutil.move(filepath, target_path)
                     stats["moved"] += 1
+                    move_thumbnail(filepath, target_path)
                     logger.info(f"  [{i}/{len(files)}] MOVED: {filename}  →  {month_str}/  (via: {source})")
 
                     # Update the DB record with the new path
@@ -288,6 +312,8 @@ def organize(base_dir: str, dry_run: bool = True, update_db: bool = True) -> dic
     finally:
         if db:
             db.close()
+        if vault_db:
+            vault_db.close()
 
     # ── Summary ──
     logger.info(f"\n{'=' * 60}")
@@ -296,12 +322,13 @@ def organize(base_dir: str, dry_run: bool = True, update_db: bool = True) -> dic
     logger.info(f"  Total files scanned:    {stats['total']}")
 
     if dry_run:
-        would_move = stats["total"] - stats["skipped_duplicate"]
+        would_move = stats["total"] - stats["skipped_duplicate"] - stats["skipped_vault"]
         logger.info(f"  Would move:             {would_move}")
     else:
         logger.info(f"  Successfully moved:     {stats['moved']}")
 
     logger.info(f"  Skipped (duplicate):    {stats['skipped_duplicate']}")
+    logger.info(f"  Skipped (vault files):  {stats['skipped_vault']}")
     logger.info(f"  Unknown date:           {stats['unknown_date']}")
     logger.info(f"  Errors:                 {stats['errors']}")
     logger.info(f"")
@@ -369,6 +396,12 @@ Safety:
     if not os.path.isdir(base_dir):
         logger.error(f"Directory does not exist: {base_dir}")
         logger.error(f"Check your .env SYNAPS_STORAGE_PATH and config.py ALLOWED_SCAN_PATHS")
+        sys.exit(1)
+
+    mirrors = os.path.join(os.path.realpath(STORAGE_PATH), "Mirrors")
+    real_base = os.path.realpath(base_dir)
+    if real_base == mirrors or real_base.startswith(mirrors + os.sep):
+        logger.error("Refusing to reorganize Mirrors/: it is managed by the Synaps vault")
         sys.exit(1)
 
     # Safety confirmation for execute mode

@@ -5,13 +5,17 @@ Synaps Database Migration: Add Content Hash
 import sqlite3
 import os
 import logging
-from config import BASE_DIR
+from config import DATABASE_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("synaps.migration")
 
 def migrate():
-    db_path = os.path.join(BASE_DIR, "synaps.db")
+    # Same database the server uses (honours SYNAPS_DB_URL), not always backend/synaps.db
+    if not DATABASE_URL.startswith("sqlite:///"):
+        logger.error(f"Only SQLite databases are supported, got {DATABASE_URL}")
+        return
+    db_path = DATABASE_URL[len("sqlite:///"):]
     if not os.path.exists(db_path):
         logger.error(f"Database not found at {db_path}")
         return
