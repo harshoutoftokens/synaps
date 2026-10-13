@@ -2,15 +2,14 @@
 
 import { Sidebar } from '@/components/Sidebar';
 import { MediaViewer } from '@/components/MediaViewer';
-import { useAppStore } from '@/lib/store';
+import { TokenPrompt } from '@/components/TokenPrompt';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { sidebarOpen } = useAppStore();
-
   return (
     <div className="min-h-screen relative">
       <Sidebar />
       <MediaViewer />
+      <TokenPrompt />
       <main
         className="min-h-screen transition-all duration-300 ease-out lg:ml-[calc(var(--sidebar-width)+16px)]"
       >

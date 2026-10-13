@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TopBar } from '@/components/TopBar';
 import { GlassPanel } from '@/components/glass/GlassPanel';
 import { GlassButton } from '@/components/glass/GlassButton';
+import { useUploads, type UploadItem } from '@/lib/uploads';
 import {
-  uploadFile,
+  clearCache,
   scanImports,
   previewImports,
   executeImport,
@@ -24,13 +25,6 @@ import {
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────
-
-interface UploadItem {
-  file: File;
-  status: 'pending' | 'uploading' | 'success' | 'duplicate' | 'error';
-  progress: number;
-  message?: string;
-}
 
 type ImportState =
   | 'idle'
@@ -51,23 +45,33 @@ function ImportSection() {
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollIdRef = useRef(0);
 
   // Check for existing running job on mount
   useEffect(() => {
     const checkLatest = async () => {
       try {
         const latest = await getLatestImport();
-        if (latest && latest.status !== 'none') {
-          if (['scanning', 'importing', 'indexing', 'pending'].includes(latest.status)) {
+        if (!latest || latest.status === 'none') return;
+        // Preview jobs share the job list with imports ('running' is preview-only)
+        const isPreviewJob = latest.status === 'running' || latest.preview_destinations != null;
+        if (isPreviewJob) {
+          if (latest.status === 'running') {
             setJobId(latest.job_id);
             setProgress(latest);
-            setImportState('importing');
-            startPolling(latest.job_id);
-          } else if (latest.status === 'complete') {
-            setProgress(latest);
-            setImportState('complete');
+            setImportState('previewing');
+            startPolling(latest.job_id, true);
           }
+          // A finished preview isn't an import: stay idle instead of showing "Import Complete"
+        } else if (['scanning', 'importing', 'indexing', 'pending'].includes(latest.status)) {
+          setJobId(latest.job_id);
+          setProgress(latest);
+          setImportState('importing');
+          startPolling(latest.job_id);
+        } else if (latest.status === 'complete') {
+          setProgress(latest);
+          setImportState('complete');
         }
       } catch {
         // No previous job, stay idle
@@ -79,35 +83,46 @@ function ImportSection() {
   }, []);
 
   const stopPolling = () => {
+    pollIdRef.current++;
     if (pollRef.current) {
-      clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
       pollRef.current = null;
     }
   };
 
+  // Chained timeouts rather than setInterval: on a busy NAS a poll can take longer than the
+  // interval, and overlapping polls just pile more load on it.
   const startPolling = (id: string, isPreview: boolean = false) => {
     stopPolling();
-    pollRef.current = setInterval(async () => {
+    const pollId = pollIdRef.current;
+    const poll = async () => {
       try {
         const p = await getImportProgress(id);
+        if (pollId !== pollIdRef.current) return;
         setProgress(p);
         if (p.status === 'complete') {
           stopPolling();
-          if (isPreview && (p as any).preview_destinations) {
-            setPreviewResult((p as any).preview_destinations);
+          if (isPreview && p.preview_destinations) {
+            setPreviewResult(p.preview_destinations);
             setImportState('previewed');
           } else if (!isPreview) {
+            clearCache();
             setImportState('complete');
           }
-        } else if (p.status === 'error') {
-          setImportState('error');
-          setError(p.phase || 'Unknown error');
+          return;
+        }
+        if (p.status === 'error') {
           stopPolling();
+          setImportState('error');
+          setError(p.error_log?.[p.error_log.length - 1] || p.phase || 'Unknown error');
+          return;
         }
       } catch {
         // Keep polling, might be a transient error
       }
-    }, 2000);
+      if (pollId === pollIdRef.current) pollRef.current = setTimeout(poll, 2000);
+    };
+    pollRef.current = setTimeout(poll, 2000);
   };
 
   const handleScan = async () => {
@@ -130,13 +145,16 @@ function ImportSection() {
     setImportState('previewing');
     setError(null);
     try {
-      const result = await previewImports();
-      if ((result as any).status === 'started' && (result as any).job_id) {
-        setJobId((result as any).job_id);
-        startPolling((result as any).job_id, true);
-      } else {
+      const result: any = await previewImports();
+      if (result.status === 'started' && result.job_id) {
+        setJobId(result.job_id);
+        startPolling(result.job_id, true);
+      } else if (result.destinations) {
+        // Older backends answered synchronously with the preview itself
         setPreviewResult(result);
         setImportState('previewed');
+      } else {
+        throw new Error('Unexpected preview response');
       }
     } catch (err: any) {
       setImportState('error');
@@ -436,71 +454,94 @@ function ImportSection() {
   );
 }
 
+// ── Upload queue row ──────────────────────────────────────────────────
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+// Memoized: progress updates for one file shouldn't re-render the whole list
+const UploadRow = memo(function UploadRow({ item }: { item: UploadItem }) {
+  const active = item.status === 'uploading' || item.status === 'processing';
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl
+        bg-[var(--glass-bg)] border border-[var(--glass-border)]"
+    >
+      {item.file.type.startsWith('video') ? (
+        <Film size={16} className="text-purple-400 shrink-0" />
+      ) : (
+        <ImageIcon size={16} className="text-blue-400 shrink-0" />
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2">
+          <p className="text-[11px] text-[var(--text-primary)] truncate">{item.file.name}</p>
+          <span className="text-[10px] text-[var(--text-tertiary)] shrink-0 tabular-nums">
+            {formatBytes(item.file.size)}
+            {item.status === 'uploading' && ` · ${item.progress}%`}
+            {item.status === 'processing' && ' · saving on NAS…'}
+          </span>
+        </div>
+        {active && (
+          <div
+            className="mt-1 h-1 rounded-full bg-[var(--glass-bg-hover)] overflow-hidden"
+            role="progressbar"
+            aria-valuenow={item.progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`Uploading ${item.file.name}`}
+          >
+            <div className="upload-progress h-full" style={{ width: `${item.progress}%` }} />
+          </div>
+        )}
+        {item.message && (
+          <p className={`text-[10px] mt-0.5 ${item.status === 'error' ? 'text-red-400' : 'text-[var(--text-tertiary)]'}`}>
+            {item.message}
+          </p>
+        )}
+      </div>
+      <div className="shrink-0">
+        {item.status === 'pending' && <Clock size={14} className="text-[var(--text-muted)]" />}
+        {active && <Loader2 size={14} className="text-[var(--accent)] animate-spin" />}
+        {item.status === 'success' && <CheckCircle2 size={14} className="text-emerald-400" />}
+        {item.status === 'duplicate' && <CheckCircle2 size={14} className="text-amber-400" />}
+        {(item.status === 'error' || item.status === 'cancelled') && <XCircle size={14} className="text-red-400" />}
+      </div>
+    </div>
+  );
+});
+
 // ── Main Sync Page ────────────────────────────────────────────────────
 
 export default function SyncPage() {
-  const [uploads, setUploads] = useState<UploadItem[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
+  // Queue lives in a store so uploads keep going (and stay visible) across page navigation
+  const uploads = useUploads((s) => s.items);
+  const isUploading = useUploads((s) => s.running);
+  const addFiles = useUploads((s) => s.addFiles);
+  const startUpload = useUploads((s) => s.start);
+  const cancelAll = useUploads((s) => s.cancelAll);
+  const retryFailed = useUploads((s) => s.retryFailed);
+  const clearFinished = useUploads((s) => s.clearFinished);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = (files: FileList | null) => {
-    if (!files) return;
-    const newUploads: UploadItem[] = Array.from(files).map((file) => ({
-      file,
-      status: 'pending',
-      progress: 0,
-    }));
-    setUploads((prev) => [...prev, ...newUploads]);
+    if (!files || files.length === 0) return;
+    addFiles(Array.from(files));
+    // Allow picking the same files again later
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const startUpload = useCallback(async () => {
-    const pending = uploads.filter((u) => u.status === 'pending');
-    if (pending.length === 0) return;
-
-    setIsUploading(true);
-
-    for (let i = 0; i < uploads.length; i++) {
-      if (uploads[i].status !== 'pending') continue;
-
-      setUploads((prev) =>
-        prev.map((u, idx) => (idx === i ? { ...u, status: 'uploading', progress: 50 } : u))
-      );
-
-      try {
-        const result = await uploadFile(uploads[i].file, 'iPhone');
-        setUploads((prev) =>
-          prev.map((u, idx) =>
-            idx === i
-              ? {
-                  ...u,
-                  status: result.status === 'duplicate' ? 'duplicate' : 'success',
-                  progress: 100,
-                  message: result.message,
-                }
-              : u
-          )
-        );
-      } catch (err: any) {
-        setUploads((prev) =>
-          prev.map((u, idx) =>
-            idx === i
-              ? { ...u, status: 'error', progress: 0, message: err.message }
-              : u
-          )
-        );
-      }
-    }
-
-    setIsUploading(false);
-  }, [uploads]);
-
-  const stats = {
-    total: uploads.length,
-    success: uploads.filter((u) => u.status === 'success').length,
-    duplicate: uploads.filter((u) => u.status === 'duplicate').length,
-    error: uploads.filter((u) => u.status === 'error').length,
-    pending: uploads.filter((u) => u.status === 'pending').length,
-  };
+  const stats = { total: uploads.length, success: 0, duplicate: 0, error: 0, pending: 0, active: 0 };
+  for (const u of uploads) {
+    if (u.status === 'success') stats.success++;
+    else if (u.status === 'duplicate') stats.duplicate++;
+    else if (u.status === 'error' || u.status === 'cancelled') stats.error++;
+    else if (u.status === 'pending') stats.pending++;
+    else stats.active++;
+  }
+  const finished = stats.success + stats.duplicate + stats.error;
 
   return (
     <div className="min-h-screen">
@@ -528,25 +569,33 @@ export default function SyncPage() {
             </div>
           </div>
           <p className="text-[13px] text-[var(--text-secondary)] mb-5 leading-relaxed">
-            Select photos and videos from your iPhone. Files are automatically organized
-            by date and deduplicated. Only missing files will be uploaded.
+            Select photos and videos from your iPhone. Files are filed into year/month folders
+            and deduplicated: files already on the NAS are skipped.
           </p>
 
           {/* Upload area */}
           <div
+            role="button"
+            tabIndex={0}
             onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
             className="relative border border-dashed border-[var(--accent)]/25 rounded-2xl p-8
               flex flex-col items-center justify-center cursor-pointer
               hover:border-[var(--accent)]/40 hover:bg-[var(--accent-muted)] transition-all duration-200"
           >
             <CloudUpload size={28} className="text-[var(--accent)] mb-3" />
             <p className="text-[13px] font-medium text-[var(--text-secondary)]">Tap to select files</p>
-            <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Photos, Videos, HEIC, RAW supported</p>
+            <p className="text-[11px] text-[var(--text-tertiary)] mt-1">JPEG, PNG, HEIC photos and MP4, MOV videos</p>
             <input
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*,video/*,.heic,.heif,.raw,.cr2,.nef,.arw,.dng"
+              accept="image/*,video/*,.heic,.heif"
               className="hidden"
               onChange={(e) => handleFiles(e.target.files)}
             />
@@ -557,66 +606,61 @@ export default function SyncPage() {
         {uploads.length > 0 && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             {/* Stats bar */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3 text-[11px]">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <div className="flex flex-wrap items-center gap-3 text-[11px]">
                 <span className="text-[var(--text-tertiary)]">{stats.total} files</span>
                 {stats.success > 0 && <span className="text-emerald-400">{stats.success} uploaded</span>}
                 {stats.duplicate > 0 && <span className="text-amber-400">{stats.duplicate} duplicates</span>}
                 {stats.error > 0 && <span className="text-red-400">{stats.error} failed</span>}
               </div>
-              <GlassButton
-                variant="accent"
-                onClick={startUpload}
-                disabled={isUploading || stats.pending === 0}
-                className="text-[12px] py-2 px-4"
-              >
+              <div className="flex items-center gap-2">
                 {isUploading ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 size={14} className="animate-spin" /> Uploading...
-                  </span>
+                  <button onClick={cancelAll} className="glass-pill">
+                    Cancel
+                  </button>
                 ) : (
-                  `Upload ${stats.pending} files`
+                  <>
+                    {stats.error > 0 && (
+                      <button onClick={retryFailed} className="glass-pill">
+                        Retry failed
+                      </button>
+                    )}
+                    {finished > 0 && (
+                      <button onClick={clearFinished} className="glass-pill">
+                        Clear finished
+                      </button>
+                    )}
+                  </>
                 )}
-              </GlassButton>
+                <GlassButton
+                  variant="accent"
+                  onClick={startUpload}
+                  disabled={isUploading || stats.pending === 0}
+                  className="text-[12px] py-2 px-4"
+                >
+                  {isUploading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" /> Uploading {finished + stats.active}/{stats.total}…
+                    </span>
+                  ) : (
+                    `Upload ${stats.pending} files`
+                  )}
+                </GlassButton>
+              </div>
             </div>
+
+            {stats.success > 0 && !isUploading && (
+              <p className="text-[11px] text-[var(--text-tertiary)] mb-3">
+                New uploads show up in the Library once they&apos;re indexed. If they don&apos;t, run
+                Settings → Rescan Now.
+              </p>
+            )}
 
             {/* File list */}
             <div className="space-y-1.5">
-              <AnimatePresence>
-                {uploads.map((item, index) => (
-                  <motion.div
-                    key={`${item.file.name}-${index}`}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl
-                      bg-[var(--glass-bg)] border border-[var(--glass-border)]"
-                  >
-                    {item.file.type.startsWith('video') ? (
-                      <Film size={16} className="text-purple-400 shrink-0" />
-                    ) : (
-                      <ImageIcon size={16} className="text-blue-400 shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] text-[var(--text-primary)] truncate">{item.file.name}</p>
-                      {item.status === 'uploading' && (
-                        <div className="mt-1 h-1 rounded-full bg-[var(--glass-bg-hover)] overflow-hidden">
-                          <div className="upload-progress h-full" style={{ width: `${item.progress}%` }} />
-                        </div>
-                      )}
-                      {item.message && (
-                        <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">{item.message}</p>
-                      )}
-                    </div>
-                    <div className="shrink-0">
-                      {item.status === 'pending' && <Clock size={14} className="text-[var(--text-muted)]" />}
-                      {item.status === 'uploading' && <Loader2 size={14} className="text-[var(--accent)] animate-spin" />}
-                      {item.status === 'success' && <CheckCircle2 size={14} className="text-emerald-400" />}
-                      {item.status === 'duplicate' && <CheckCircle2 size={14} className="text-amber-400" />}
-                      {item.status === 'error' && <XCircle size={14} className="text-red-400" />}
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+              {uploads.map((item) => (
+                <UploadRow key={item.id} item={item} />
+              ))}
             </div>
           </motion.div>
         )}
