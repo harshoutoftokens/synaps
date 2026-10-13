@@ -239,17 +239,13 @@ public struct PhotosGridView: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 320)
                         Button("Try Again") {
-                            viewModel.refreshCurrentFolder()
+                            if viewModel.isNASSection {
+                                viewModel.loadNASFolder(path: viewModel.currentNASRelativePath)
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .padding(.top, 4)
-                        if viewModel.nasAuthFailed {
-                            SettingsLink {
-                                Text("Open Settings…")
-                            }
-                            .controlSize(.small)
-                        }
                     }
                 }
                 Spacer()
@@ -417,8 +413,6 @@ public struct PhotoThumbnailCell: View {
     @State private var nsImage: NSImage?
     @State private var isHovered = false
     @State private var itemInfo: String = ""
-    /// Identifies this cell's thumbnail request so scrolling away cancels only its own interest.
-    @State private var thumbnailToken: UUID?
     
     private var isDirectoryOrDoc: Bool {
         item.isDirectory || !item.isImageOrVideo
@@ -465,18 +459,13 @@ public struct PhotoThumbnailCell: View {
             loadInfo()
         }
         .onDisappear {
-            if let token = thumbnailToken {
-                if item.originalPath.hasPrefix("nas://") {
-                    NASThumbnailLoader.shared.cancelLoad(token: token, for: item.originalPath)
-                } else {
-                    ThumbnailLoader.shared.cancelLoad(token: token, for: item.originalPath)
-                }
-                thumbnailToken = nil
+            if item.originalPath.hasPrefix("nas://") {
+                NASThumbnailLoader.shared.cancelLoad(for: item.originalPath)
             }
         }
         .onReceive(iPhoneManager.shared.$thumbnailsVersion) { _ in
             if item.originalPath.hasPrefix("iPhone://") && nsImage == nil {
-                if let img = iPhoneManager.shared.getThumbnail(for: item.id) {
+                if let img = iPhoneManager.shared.getThumbnail(for: item.filename) {
                     self.nsImage = img
                 }
             }
@@ -678,7 +667,7 @@ public struct PhotoThumbnailCell: View {
             return
         }
         if item.originalPath.hasPrefix("iPhone://") {
-            iPhoneManager.shared.loadThumbnail(for: item.id) { image in
+            iPhoneManager.shared.loadThumbnail(for: item.filename) { image in
                 if let image = image {
                     self.nsImage = image
                 }
@@ -689,8 +678,7 @@ public struct PhotoThumbnailCell: View {
                 self.nsImage = cached
                 return
             }
-            thumbnailToken = NASThumbnailLoader.shared.loadThumbnail(for: relativePath, baseUrl: NASClient.shared.getBaseUrl(), targetSize: max(160, size * 2)) { image in
-                thumbnailToken = nil
+            NASThumbnailLoader.shared.loadThumbnail(for: relativePath, baseUrl: NASClient.shared.getBaseUrl(), targetSize: max(160, size * 2)) { image in
                 if let image = image {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         self.nsImage = image
@@ -698,8 +686,7 @@ public struct PhotoThumbnailCell: View {
                 }
             }
         } else {
-            thumbnailToken = ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: max(160, size * 2)) { image in
-                thumbnailToken = nil
+            ThumbnailLoader.shared.loadThumbnail(for: item.originalPath, targetSize: max(160, size * 2)) { image in
                 self.nsImage = image
             }
         }

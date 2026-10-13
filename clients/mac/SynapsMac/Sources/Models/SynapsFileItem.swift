@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SynapsFileItem: Identifiable, Hashable, Sendable {
+public struct SynapsFileItem: Identifiable, Hashable {
     public let id: String
     public var originalPath: String
     public var filename: String
