@@ -39,13 +39,13 @@ next-env.d.ts
 
 # 5. Media, Uploads, Thumbnails & Cache
 mock_storage/
-iphone/
+/iphone/
 backend/thumbnails/
 backend/trash/
 uploaded_media/
-thumbnails/
-trash/
-cache/
+/thumbnails/
+/trash/
+/cache/
 .cache/
 .synaps_tmp/
 migration_plan.json
