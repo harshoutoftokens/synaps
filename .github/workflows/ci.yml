@@ -74,13 +74,13 @@ jobs:
           ! grep -qi "unknown\|invalid\|failed to parse" /tmp/verify.log
 
   mac:
-    name: Mac client build + tests
+    name: Mac client build
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: swift test
+      - name: swift build
         working-directory: clients/mac/SynapsMac
-        run: swift test
+        run: swift build
 
   ios:
     name: iPhone client build

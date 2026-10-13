@@ -465,7 +465,7 @@ public struct PhotoThumbnailCell: View {
         }
         .onReceive(iPhoneManager.shared.$thumbnailsVersion) { _ in
             if item.originalPath.hasPrefix("iPhone://") && nsImage == nil {
-                if let img = iPhoneManager.shared.getThumbnail(for: item.id) {
+                if let img = iPhoneManager.shared.getThumbnail(for: item.filename) {
                     self.nsImage = img
                 }
             }
@@ -667,7 +667,7 @@ public struct PhotoThumbnailCell: View {
             return
         }
         if item.originalPath.hasPrefix("iPhone://") {
-            iPhoneManager.shared.loadThumbnail(for: item.id) { image in
+            iPhoneManager.shared.loadThumbnail(for: item.filename) { image in
                 if let image = image {
                     self.nsImage = image
                 }

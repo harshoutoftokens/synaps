@@ -11,14 +11,6 @@ public struct ConnectedPhoneInfo: Identifiable {
     public let totalItems: Int
 }
 
-/// Plain values copied out of an ICCameraFile so the list can be built off the main thread.
-private struct PhoneFileEntry: Sendable {
-    let id: String
-    let name: String
-    let size: Int64
-    let date: Date
-}
-
 public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDelegate, ICCameraDeviceDelegate, ICCameraDeviceDownloadDelegate {
     public static let shared = iPhoneManager()
     
@@ -36,21 +28,14 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     
     private let browser = ICDeviceBrowser()
     private var activeCamera: ICCameraDevice?
-    /// Keyed by item id ("iPhone://<DCIM folder>/<name>"): file names alone repeat on a phone
-    /// (100APPLE/IMG_0001.JPG and 105APPLE/IMG_0001.JPG), which used to hide one of the photos.
-    private var cameraFilesById: [String: ICCameraFile] = [:]
+    private var cameraFilesByName: [String: ICCameraFile] = [:]
     private let thumbnailCache = NSCache<NSString, NSImage>()
-    /// Coalesces the burst of didAdd callbacks while the phone's catalog loads.
-    private var pendingListUpdate: DispatchWorkItem?
-    private var listGeneration = 0
-    /// Phone items already looked up on the NAS this session (main thread only).
-    private var nasMatchCheckedIds = Set<String>()
     
-    public let importDirectoryURL: URL = {
+    public var importDirectoryURL: URL {
         let pictures = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures", isDirectory: true)
         return pictures.appendingPathComponent("Synaps Imports", isDirectory: true)
-    }()
+    }
     
     public override init() {
         super.init()
@@ -69,28 +54,12 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         browser.stop()
     }
     
-    /// Stable id of a camera item, also used as its SynapsFileItem id and cache key.
-    private static func identifier(for item: ICCameraItem) -> String {
-        let name = item.name ?? ""
-        if let folder = item.parentFolder?.name, !folder.isEmpty {
-            return "iPhone://\(folder)/\(name)"
-        }
-        return "iPhone://\(name)"
-    }
-    
-    /// Record keys written by earlier versions (by name only; stored relative to the working directory).
-    private static func legacyKeys(forName name: String) -> [String] {
-        return ["iPhone://\(name)", "/iPhone:/\(name)"]
-    }
-    
     public func checkDeviceStatus() {
         guard let camera = activeCamera else { return }
-        // Decide on the fresh value; the published flag is only updated asynchronously.
-        let locked = camera.isLocked || camera.isAccessRestrictedAppleDevice
         DispatchQueue.main.async {
-            self.isDeviceLocked = locked
+            self.isDeviceLocked = camera.isLocked || camera.isAccessRestrictedAppleDevice
         }
-        if !locked {
+        if !self.isDeviceLocked {
             updateDeviceMediaList(camera)
         }
     }
@@ -103,17 +72,16 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
             camera.requestOpenSession()
             
             let locked = camera.isLocked || camera.isAccessRestrictedAppleDevice
-            let info = ConnectedPhoneInfo(
-                id: camera.uuidString ?? UUID().uuidString,
-                name: camera.name ?? "iPhone",
-                model: "iOS Device",
-                transportType: camera.transportType ?? "USB",
-                totalItems: camera.mediaFiles?.count ?? 0
-            )
             
             DispatchQueue.main.async {
                 self.isDeviceLocked = locked
-                self.connectedDevice = info
+                self.connectedDevice = ConnectedPhoneInfo(
+                    id: camera.uuidString ?? UUID().uuidString,
+                    name: camera.name ?? "iPhone",
+                    model: "iOS Device",
+                    transportType: camera.transportType ?? "USB",
+                    totalItems: camera.mediaFiles?.count ?? 0
+                )
             }
         }
     }
@@ -121,12 +89,8 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     public func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
         if device == activeCamera {
             activeCamera = nil
-            cameraFilesById.removeAll()
-            pendingListUpdate?.cancel()
-            // Another phone may use the same folder/file names
-            thumbnailCache.removeAllObjects()
+            cameraFilesByName.removeAll()
             DispatchQueue.main.async {
-                self.listGeneration += 1
                 self.connectedDevice = nil
                 self.isDeviceLocked = false
                 self.phoneMediaItems = []
@@ -142,9 +106,8 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
             return
         }
         if let camera = device as? ICCameraDevice {
-            let locked = camera.isLocked || camera.isAccessRestrictedAppleDevice
             DispatchQueue.main.async {
-                self.isDeviceLocked = locked
+                self.isDeviceLocked = camera.isLocked || camera.isAccessRestrictedAppleDevice
             }
             updateDeviceMediaList(camera)
         }
@@ -155,11 +118,11 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     
     // MARK: - ICCameraDeviceDelegate
     public func cameraDevice(_ camera: ICCameraDevice, didAdd items: [ICCameraItem]) {
-        scheduleMediaListUpdate(camera)
+        updateDeviceMediaList(camera)
     }
     
     public func cameraDevice(_ camera: ICCameraDevice, didRemove items: [ICCameraItem]) {
-        scheduleMediaListUpdate(camera)
+        updateDeviceMediaList(camera)
     }
     
     public func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
@@ -228,10 +191,10 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     
     @objc(cameraDevice:didReceiveThumbnail:forItem:error:)
     public func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {
-        guard let cgImage = thumbnail, item.name != nil else { return }
+        guard let cgImage = thumbnail, let name = item.name else { return }
         let nsImage = downscaleCGImage(cgImage, targetDimension: 160)
         let cost = Int(nsImage.size.width * nsImage.size.height * 4)
-        thumbnailCache.setObject(nsImage, forKey: Self.identifier(for: item) as NSString, cost: cost)
+        thumbnailCache.setObject(nsImage, forKey: name as NSString, cost: cost)
         DispatchQueue.main.async {
             self.thumbnailsVersion += 1
         }
@@ -258,17 +221,17 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     }
     
     // MARK: - Thumbnail Retrieval
-    public func getThumbnail(for id: String) -> NSImage? {
-        return thumbnailCache.object(forKey: id as NSString)
+    public func getThumbnail(for filename: String) -> NSImage? {
+        return thumbnailCache.object(forKey: filename as NSString)
     }
     
-    public func loadThumbnail(for id: String, completion: @escaping (NSImage?) -> Void) {
-        if let cached = thumbnailCache.object(forKey: id as NSString) {
+    public func loadThumbnail(for filename: String, completion: @escaping (NSImage?) -> Void) {
+        if let cached = thumbnailCache.object(forKey: filename as NSString) {
             completion(cached)
             return
         }
         
-        guard let file = cameraFilesById[id] else {
+        guard let file = cameraFilesByName[filename] else {
             completion(nil)
             return
         }
@@ -277,7 +240,7 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         if let cgThumb = file.thumbnail {
             let nsImage = downscaleCGImage(cgThumb, targetDimension: 160)
             let cost = Int(nsImage.size.width * nsImage.size.height * 4)
-            thumbnailCache.setObject(nsImage, forKey: id as NSString, cost: cost)
+            thumbnailCache.setObject(nsImage, forKey: filename as NSString, cost: cost)
             completion(nsImage)
             return
         }
@@ -287,7 +250,7 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
             guard let self = self else { return }
             if let data = data, let img = self.downscaleData(data, targetDimension: 160) {
                 let cost = Int(img.size.width * img.size.height * 4)
-                self.thumbnailCache.setObject(img, forKey: id as NSString, cost: cost)
+                self.thumbnailCache.setObject(img, forKey: filename as NSString, cost: cost)
                 DispatchQueue.main.async {
                     completion(img)
                 }
@@ -298,64 +261,50 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         }
     }
     
-    public func requestThumbnail(for id: String) {
-        loadThumbnail(for: id) { _ in }
+    public func requestThumbnail(for filename: String) {
+        loadThumbnail(for: filename) { _ in }
     }
     
     // MARK: - Media List Update
-    private func scheduleMediaListUpdate(_ camera: ICCameraDevice) {
-        pendingListUpdate?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.updateDeviceMediaList(camera)
-        }
-        pendingListUpdate = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
-    }
-    
     private func updateDeviceMediaList(_ camera: ICCameraDevice) {
-        pendingListUpdate?.cancel()
-        pendingListUpdate = nil
         let isLocked = camera.isLocked || camera.isAccessRestrictedAppleDevice
         DispatchQueue.main.async {
             self.isDeviceLocked = isLocked
         }
         guard !isLocked else { return }
-        // compactMap: a single non-file item used to make the whole cast fail (empty list)
-        let files = (camera.mediaFiles ?? []).compactMap { $0 as? ICCameraFile }
+        guard let files = camera.mediaFiles as? [ICCameraFile] else { return }
         
-        // Copy the values we need here; the cache lookups below run on a background queue.
         var fileDict: [String: ICCameraFile] = [:]
-        var entries: [PhoneFileEntry] = []
-        entries.reserveCapacity(files.count)
         for file in files {
-            guard let name = file.name else { continue }
-            let id = Self.identifier(for: file)
-            fileDict[id] = file
-            entries.append(PhoneFileEntry(id: id, name: name, size: file.fileSize, date: file.fileCreationDate ?? Date()))
+            if let name = file.name {
+                fileDict[name] = file
+            }
         }
-        self.cameraFilesById = fileDict
-        
-        listGeneration += 1
-        let generation = listGeneration
+        self.cameraFilesByName = fileDict
         
         DispatchQueue.global(qos: .userInitiated).async {
             var items: [SynapsFileItem] = []
             var albumsSet = Set<String>()
             let cacheStore = LocalCacheStore.shared
             
-            for entry in entries {
+            for file in files {
+                guard let name = file.name else { continue }
+                let fileSize = file.fileSize
+                let mtime = file.fileCreationDate ?? Date()
+                let virtualPath = "iPhone://\(name)"
+                
                 var status: SyncStatus = .uncommitted
                 var sha: String? = nil
                 var isFav = false
                 var album: String? = nil
                 
-                let cached = cacheStore.getRecord(for: entry.id)
-                    ?? Self.legacyKeys(forName: entry.name).lazy.compactMap { cacheStore.getRecord(for: $0) }.first
-                if let cached = cached, cached.size == entry.size {
-                    status = cached.syncStatus == SyncStatus.committed.rawValue ? .committed : .uncommitted
-                    sha = cached.sha256
-                    isFav = cached.isFavorite
-                    album = cached.album
+                if let cached = cacheStore.getRecord(for: virtualPath) {
+                    if cached.size == fileSize {
+                        status = cached.syncStatus == SyncStatus.committed.rawValue ? .committed : .uncommitted
+                        sha = cached.sha256
+                        isFav = cached.isFavorite
+                        album = cached.album
+                    }
                 }
                 
                 if let album = album {
@@ -363,33 +312,29 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
                 }
                 
                 let item = SynapsFileItem(
-                    id: entry.id,
-                    originalPath: entry.id,
-                    filename: entry.name,
-                    fileSize: entry.size,
+                    id: virtualPath,
+                    originalPath: virtualPath,
+                    filename: name,
+                    fileSize: fileSize,
                     sourceLocation: "iPhone Camera Roll",
-                    modifiedAt: entry.date,
-                    createdAt: entry.date,
+                    modifiedAt: mtime,
+                    createdAt: mtime,
                     sha256: sha,
                     syncStatus: status,
                     isDirectory: false,
                     isFavorite: isFav,
                     albumName: album,
                     sourceId: "iphone_harsh",
-                    isLivePhotoVideo: entry.name.lowercased().hasSuffix(".mov")
+                    isLivePhotoVideo: name.lowercased().hasSuffix(".mov")
                 )
                 items.append(item)
             }
             
             items.sort { $0.modifiedAt > $1.modifiedAt }
-            let albums = Array(albumsSet).sorted()
             
             DispatchQueue.main.async {
-                // A newer listing (or a disconnect) superseded this one
-                guard generation == self.listGeneration else { return }
                 self.phoneMediaItems = items
-                self.detectedAlbums = albums
-                self.markItemsAlreadyOnNAS(items)
+                self.detectedAlbums = Array(albumsSet).sorted()
                 if let dev = self.connectedDevice {
                     self.connectedDevice = ConnectedPhoneInfo(
                         id: dev.id,
@@ -403,101 +348,18 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         }
     }
     
-    // MARK: - Items already on the NAS
-    
-    /// Photos can reach the NAS without this view knowing (AirDropped to the Mac and synced from a
-    /// folder, uploaded by the iPhone app, ...). Ask the NAS which phone files it already has, by
-    /// file name and size, and remember those as committed. Runs on the main thread.
-    private func markItemsAlreadyOnNAS(_ items: [SynapsFileItem]) {
-        let unknown = items.filter { $0.syncStatus != .committed && $0.fileSize > 0 && !nasMatchCheckedIds.contains($0.id) }
-        guard !unknown.isEmpty else { return }
-        nasMatchCheckedIds.formUnion(unknown.map(\.id))
-        let lookups = unknown.map { (id: $0.id, file: IngestMatchFile(filename: $0.filename, size: $0.fileSize)) }
-        
-        Task.detached(priority: .utility) {
-            let matches: [IngestMatch]
-            do {
-                matches = try await NASClient.shared.matchExisting(Array(Set(lookups.map(\.file))))
-            } catch {
-                // NAS offline or an older server: look these items up again on the next refresh
-                print("⚠️ Could not match phone items with the NAS: \(error.localizedDescription)")
-                await MainActor.run { iPhoneManager.shared.nasMatchCheckedIds.subtract(lookups.map(\.id)) }
-                return
-            }
-            var shaByFile: [IngestMatchFile: String] = [:]
-            for match in matches {
-                shaByFile[IngestMatchFile(filename: match.filename, size: match.size)] = match.sha256
-            }
-            let now = Date().timeIntervalSince1970
-            var found: [String: String] = [:]
-            for lookup in lookups {
-                guard let sha = shaByFile[lookup.file] else { continue }
-                found[lookup.id] = sha
-                LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
-                    path: lookup.id,
-                    inode: 0,
-                    size: lookup.file.size,
-                    mtime: now,
-                    sha256: sha,
-                    lastSyncedAt: now,
-                    syncStatus: SyncStatus.committed.rawValue,
-                    album: nil,
-                    isFavorite: false
-                ))
-            }
-            guard !found.isEmpty else { return }
-            let matched = found
-            await MainActor.run {
-                let manager = iPhoneManager.shared
-                for i in manager.phoneMediaItems.indices {
-                    if let sha = matched[manager.phoneMediaItems[i].id] {
-                        manager.phoneMediaItems[i].syncStatus = .committed
-                        manager.phoneMediaItems[i].sha256 = sha
-                    }
-                }
-            }
-        }
-    }
-    
     // MARK: - Download / Import Implementation
-    
-    /// Downloads into a private staging folder, then moves the file into the import folder under a
-    /// unique name. The old in-place overwrite could replace a *different* photo with the same name;
-    /// a byte-identical earlier import is reused instead of duplicated.
     private func downloadFile(_ cameraFile: ICCameraFile, to directoryURL: URL) async -> URL? {
         guard activeCamera != nil else { return nil }
         
         let filename = cameraFile.name ?? "photo.jpg"
-        let stagingDir = directoryURL.appendingPathComponent(".synaps-staging-\(UUID().uuidString)", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
-        } catch {
-            print("❌ Cannot create staging folder for \(filename): \(error.localizedDescription)")
-            return nil
-        }
-        defer { try? FileManager.default.removeItem(at: stagingDir) }
-        
-        guard let staged = await requestDownload(cameraFile, filename: filename, into: stagingDir) else {
-            return nil
-        }
-        
-        // Moving (and possibly hashing to detect an identical earlier import) is blocking I/O
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: Self.placeImportedFile(staged, preferredName: filename, in: directoryURL))
-            }
-        }
-    }
-    
-    private func requestDownload(_ cameraFile: ICCameraFile, filename: String, into directoryURL: URL) async -> URL? {
         let expectedDest = directoryURL.appendingPathComponent(filename)
+        
         let options: [ICDownloadOption: Any] = [
             .downloadsDirectoryURL: directoryURL as NSURL,
             .overwrite: NSNumber(value: true),
             ICDownloadOption(rawValue: "ICOverwriteExistingFile"): NSNumber(value: true)
         ]
-        // A fixed 30 s used to abort multi-GB videos mid-transfer; allow for ~5 MB/s over USB.
-        let timeout = max(60.0, 30.0 + Double(max(0, cameraFile.fileSize)) / (5.0 * 1024 * 1024))
         
         return await withCheckedContinuation { continuation in
             var hasResumed = false
@@ -513,7 +375,7 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
                     continuation.resume(returning: nil)
                 }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWork)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeoutWork)
             
             _ = cameraFile.requestDownload(options: options) { savedFilename, error in
                 timeoutWork.cancel()
@@ -552,76 +414,15 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         }
     }
     
-    private static func placeImportedFile(_ staged: URL, preferredName: String, in directory: URL) -> URL? {
-        let fm = FileManager.default
-        let preferred = directory.appendingPathComponent(preferredName)
-        if fm.fileExists(atPath: preferred.path), filesHaveSameContent(staged, preferred) {
-            return preferred
-        }
-        do {
-            return try fm.moveItemToUniqueURL(at: staged, preferred: preferred)
-        } catch {
-            print("❌ Could not move imported \(preferredName) into place: \(error.localizedDescription)")
-            return nil
-        }
-    }
-    
-    private static func filesHaveSameContent(_ a: URL, _ b: URL) -> Bool {
-        let fm = FileManager.default
-        guard let sizeA = (try? fm.attributesOfItem(atPath: a.path))?[.size] as? NSNumber,
-              let sizeB = (try? fm.attributesOfItem(atPath: b.path))?[.size] as? NSNumber,
-              sizeA == sizeB else { return false }
-        guard let shaA = HashEngine.computeSHA256(for: a.path) else { return false }
-        return shaA == HashEngine.computeSHA256(for: b.path)
-    }
-    
-    /// Hashes the imported file and records both the local copy and the phone item as imported.
-    /// Runs off the main thread: hashing a 4K video took the UI down with it.
-    private static func indexImportedFile(at path: String, virtualPath: String, cameraFileSize: Int64) async {
-        guard let sha = await HashEngine.computeSHA256Async(for: path) else { return }
-        let stat = try? FileManager.default.attributesOfItem(atPath: path)
-        let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
-        let fileSize = (stat?[.size] as? NSNumber)?.int64Value ?? cameraFileSize
-        let now = Date().timeIntervalSince1970
-        // The real mtime, so the folder scanner can reuse this hash instead of recomputing it
-        let mtime = (stat?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? now
-        
-        // Save local imported file record
-        LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
-            path: path,
-            inode: inode,
-            size: fileSize,
-            mtime: mtime,
-            sha256: sha,
-            lastSyncedAt: nil,
-            syncStatus: SyncStatus.uncommitted.rawValue,
-            album: "iPhone Import",
-            isFavorite: false
-        ))
-        
-        // Also mark virtual record as committed
-        LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
-            path: virtualPath,
-            inode: 0,
-            size: cameraFileSize,
-            mtime: now,
-            sha256: sha,
-            lastSyncedAt: now,
-            syncStatus: SyncStatus.committed.rawValue,
-            album: "iPhone Import",
-            isFavorite: false
-        ))
-    }
-    
     @MainActor
-    public func importItems(ids: [String]) async {
-        guard !ids.isEmpty, !isImporting else { return }
+    public func importItems(filenames: [String]) async {
+        guard !filenames.isEmpty else { return }
         guard activeCamera != nil else {
             importStatusMessage = "No iPhone connected"
             return
         }
         
-        let filesToDownload = ids.compactMap { id in cameraFilesById[id].map { (id, $0) } }
+        let filesToDownload = filenames.compactMap { cameraFilesByName[$0] }
         guard !filesToDownload.isEmpty else {
             importStatusMessage = "No items matched for import"
             return
@@ -636,16 +437,48 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
         
         var importedVirtualPaths = Set<String>()
         
-        for (index, (id, file)) in filesToDownload.enumerated() {
+        for (index, file) in filesToDownload.enumerated() {
             let name = file.name ?? "file"
             importStatusMessage = "[\(index + 1)/\(total)] Importing \(name)..."
             
             if let downloadedURL = await downloadFile(file, to: destDir) {
                 importedItemsCount += 1
-                importedVirtualPaths.insert(id)
+                let virtualPath = "iPhone://\(name)"
+                importedVirtualPaths.insert(virtualPath)
                 
                 // Hash and index into local cache store
-                await Self.indexImportedFile(at: downloadedURL.path, virtualPath: id, cameraFileSize: file.fileSize)
+                if let sha = HashEngine.computeSHA256(for: downloadedURL.path) {
+                    let stat = try? FileManager.default.attributesOfItem(atPath: downloadedURL.path)
+                    let inode = (stat?[.systemFileNumber] as? NSNumber)?.int64Value ?? 0
+                    let fileSize = (stat?[.size] as? NSNumber)?.int64Value ?? file.fileSize
+                    let now = Date().timeIntervalSince1970
+                    
+                    // Save local imported file record
+                    LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
+                        path: downloadedURL.path,
+                        inode: inode,
+                        size: fileSize,
+                        mtime: now,
+                        sha256: sha,
+                        lastSyncedAt: nil,
+                        syncStatus: SyncStatus.uncommitted.rawValue,
+                        album: "iPhone Import",
+                        isFavorite: false
+                    ))
+                    
+                    // Also mark virtual record as committed
+                    LocalCacheStore.shared.saveRecord(LocalCacheStore.CachedRecord(
+                        path: virtualPath,
+                        inode: 0,
+                        size: file.fileSize,
+                        mtime: now,
+                        sha256: sha,
+                        lastSyncedAt: now,
+                        syncStatus: SyncStatus.committed.rawValue,
+                        album: "iPhone Import",
+                        isFavorite: false
+                    ))
+                }
             }
             
             importProgress = Double(index + 1) / Double(total)
@@ -666,6 +499,10 @@ public final class iPhoneManager: NSObject, ObservableObject, ICDeviceBrowserDel
     }
     
     private func notify(title: String, message: String) {
-        UserNotifier.shared.post(title: title, message: message)
+        let script = "display notification \"\(message)\" with title \"\(title)\""
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", script]
+        try? p.run()
     }
 }

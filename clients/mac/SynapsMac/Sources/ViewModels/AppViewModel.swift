@@ -52,10 +52,29 @@ public final class AppViewModel: ObservableObject {
         return currentFolderPath.isEmpty ? (selectedSidebarItem?.title ?? "Home") : currentFolderPath.replacingOccurrences(of: "/", with: " / ")
     }
     
-    /// Parses NAS timestamps: ISO-8601 with or without fractional seconds and with or without a
-    /// timezone. Naive values (NAS local time) are read in the Mac's time zone.
-    nonisolated public static func parseDate(_ string: String?) -> Date? {
-        return NASDateParser.parse(string)
+    /// Parses dates from ISO8601 strings (with or without timezone and with or without fractional seconds)
+    public static func parseDate(_ string: String?) -> Date? {
+        guard let string = string, !string.isEmpty else { return nil }
+        
+        let isoWithFraction = ISO8601DateFormatter()
+        isoWithFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = isoWithFraction.date(from: string) { return d }
+        
+        let isoStandard = ISO8601DateFormatter()
+        isoStandard.formatOptions = [.withInternetDateTime]
+        if let d = isoStandard.date(from: string) { return d }
+        
+        let isoNoTz = ISO8601DateFormatter()
+        isoNoTz.formatOptions = [.withFullDate, .withTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        if let d = isoNoTz.date(from: string) { return d }
+        
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: string) { return d }
+        }
+        return nil
     }
     
     public enum SortField: String, CaseIterable, Identifiable {
@@ -515,9 +534,9 @@ public final class AppViewModel: ObservableObject {
     }
     
     public func importSelectedItems() {
-        let ids = filteredItems.filter { selectedItemIds.contains($0.id) }.map { $0.id }
+        let filenames = filteredItems.filter { selectedItemIds.contains($0.id) }.map { $0.filename }
         Task {
-            await phoneManager.importItems(ids: ids)
+            await phoneManager.importItems(filenames: filenames)
             self.selectedItemIds.removeAll()
             if self.isPicturesSection {
                 self.fileItems = self.phoneManager.phoneMediaItems
@@ -526,9 +545,9 @@ public final class AppViewModel: ObservableObject {
     }
     
     public func importAllItems() {
-        let ids = filteredItems.map { $0.id }
+        let filenames = filteredItems.map { $0.filename }
         Task {
-            await phoneManager.importItems(ids: ids)
+            await phoneManager.importItems(filenames: filenames)
             self.selectedItemIds.removeAll()
             if self.isPicturesSection {
                 self.fileItems = self.phoneManager.phoneMediaItems
@@ -658,8 +677,7 @@ public final class AppViewModel: ObservableObject {
         syncStatusMessage = "Downloading \(item.filename)..."
         Task {
             do {
-                _ = try await nasClient.downloadFile(relativePath: relativePath, destinationURL: destUrl)
-                let success = true
+                let success = try await nasClient.downloadFile(relativePath: relativePath, destinationURL: destUrl)
                 await MainActor.run {
                     if success {
                         self.syncStatusMessage = "Downloaded \(item.filename) to Downloads"
@@ -764,7 +782,7 @@ public final class AppViewModel: ObservableObject {
     public func syncItem(_ item: SynapsFileItem) {
         if isPicturesSection || item.originalPath.hasPrefix("iPhone://") {
             Task {
-                await phoneManager.importItems(ids: [item.id])
+                await phoneManager.importItems(filenames: [item.filename])
                 if self.isPicturesSection {
                     self.fileItems = self.phoneManager.phoneMediaItems
                 }
@@ -954,8 +972,7 @@ public final class AppViewModel: ObservableObject {
                 
                 let t0 = Date()
                 do {
-                    _ = try await nasClient.uploadFile(item: item, sourceId: item.sourceId)
-                    let success = true
+                    let success = try await nasClient.uploadFile(item: item, sourceId: item.sourceId)
                     if success {
                         uploadedCount += 1
                         totalBytesUploaded += item.fileSize
