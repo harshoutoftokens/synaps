@@ -106,8 +106,11 @@ final class SyncLiveActivityController {
         Task { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 
-    /// "homecloud1" for http://homecloud1.local:8000, the IP otherwise.
+    /// The name the NAS reports ("homecloud1"); before it has reported one, the host from its URL.
     private static func nasName() -> String {
+        if let name = UserDefaults.standard.string(forKey: NASClient.serverNameKey), !name.isEmpty {
+            return name
+        }
         let host = URL(string: SynapsConfig.load().nasUrl)?.host ?? "NAS"
         return host.hasSuffix(".local") ? String(host.dropLast(6)) : host
     }

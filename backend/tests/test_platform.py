@@ -325,3 +325,10 @@ def test_init_db_adds_columns_missing_from_older_databases(tmp_path):
         indexes = {r[1] for r in conn.exec_driver_sql("PRAGMA index_list(media_files)")}
     assert rows == {1: "iphone", 2: "mac"}
     assert "ix_media_files_source" in indexes
+
+
+def test_health_reports_the_nas_host_name(client):
+    import socket
+    body = client.get("/api/health").json()
+    assert body["status"] == "ok"
+    assert body["name"] == socket.gethostname().split(".")[0]
