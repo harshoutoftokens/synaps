@@ -8,7 +8,10 @@ import Foundation
 /// 2. Deep Tier: Hash-based provenance verification against the NAS vault (`/api/v2/ingest/check`),
 ///    identifying deduplicated files across devices, renamed items, or files synced prior to client setup.
 /// 3. Authoritative sync status enforcement: Genuine non-existent or deleted NAS items remain/revert to uncommitted.
-public final class NASReconciliationEngine {
+///
+/// Only the files of the reconciled folder change state here, so subfolder statuses (which are derived
+/// from the cache records of the files inside them) are left untouched.
+public final class NASReconciliationEngine: @unchecked Sendable {
     public static let shared = NASReconciliationEngine()
     
     private let nasClient: NASClient
@@ -54,6 +57,7 @@ public final class NASReconciliationEngine {
     ) async -> [SynapsFileItem] {
         var updatedItems = localItems
         let mirrorPath = Self.resolveMirrorPath(for: directoryPath, sourceLocation: sourceLocation)
+        let startedAt = Date()
         
         // 1. Fetch remote files in the mirrored directory from the authoritative NAS
         var remoteFilesByName: [String: Int64] = [:]
@@ -66,8 +70,12 @@ public final class NASReconciliationEngine {
             print("⚠️ [NASReconciliation] Could not query mirror path \(mirrorPath): \(error.localizedDescription)")
             return localItems
         }
+        guard !Task.isCancelled else { return localItems }
         
         var itemsNeedingDeepCheck: [SynapsFileItem] = []
+        var verifiedItems: [SynapsFileItem] = []
+        var revertedPaths: [String] = []
+        var activities: [SyncActivityItem] = []
         
         // 2. Fast Tier: match filename + file size against remote mirror
         for i in 0..<updatedItems.count {
@@ -82,21 +90,14 @@ public final class NASReconciliationEngine {
                 // Exact match on authoritative NAS mirror!
                 if updatedItems[i].syncStatus != .committed {
                     updatedItems[i].syncStatus = .committed
-                    cacheStore.recordItemSynced(
-                        path: updatedItems[i].originalPath,
-                        fileSize: localSize,
-                        modifiedAt: updatedItems[i].modifiedAt,
-                        sha256: updatedItems[i].sha256,
-                        album: updatedItems[i].albumName,
-                        isFavorite: updatedItems[i].isFavorite
-                    )
-                    cacheStore.logActivity(
+                    verifiedItems.append(updatedItems[i])
+                    activities.append(SyncActivityItem(
                         eventType: .existingDiscovered,
                         filePath: updatedItems[i].originalPath,
                         filename: filename,
                         details: "Verified in NAS mirror (metadata match)",
                         sourceId: sourceId
-                    )
+                    ))
                 }
             } else {
                 // Not in NAS mirror directory at this path.
@@ -108,11 +109,15 @@ public final class NASReconciliationEngine {
                     // and no hash exists to prove it is in vault, revert to uncommitted.
                     if updatedItems[i].syncStatus == .committed {
                         updatedItems[i].syncStatus = .uncommitted
-                        cacheStore.updateSyncStatus(path: updatedItems[i].originalPath, status: .uncommitted)
+                        revertedPaths.append(updatedItems[i].originalPath)
                     }
                 }
             }
         }
+        
+        cacheStore.recordItemsSynced(verifiedItems)
+        cacheStore.updateSyncStatuses(paths: revertedPaths, status: .uncommitted, notSyncedSince: startedAt)
+        cacheStore.logActivities(activities)
         
         // 3. Deep Tier: check SHA-256 deduplication against the NAS vault
         if !itemsNeedingDeepCheck.isEmpty {
@@ -121,13 +126,6 @@ public final class NASReconciliationEngine {
                 allCurrentItems: updatedItems,
                 sourceId: sourceId
             )
-        }
-        
-        // 4. Re-evaluate folder sync statuses for any subdirectories
-        for i in 0..<updatedItems.count {
-            if updatedItems[i].isDirectory {
-                updatedItems[i].syncStatus = LocalFileScanner.shared.evaluateFolderSyncStatus(folderPath: updatedItems[i].originalPath)
-            }
         }
         
         return updatedItems
@@ -149,72 +147,78 @@ public final class NASReconciliationEngine {
         )
     }
     
-    /// Batch checks SHA-256 hashes against NAS /api/v2/ingest/check.
-    /// If dedup_linked, marks as .committed. If need_upload, ensures status is .uncommitted.
+    /// Batch checks SHA-256 hashes against NAS /api/v2/ingest/check (NASClient splits it into
+    /// requests of at most 200 files). If dedup_linked, marks as .committed. If need_upload,
+    /// ensures status is .uncommitted.
     private func performDedupCheck(
         candidates: [SynapsFileItem],
         allCurrentItems: [SynapsFileItem],
         sourceId: String
     ) async -> [SynapsFileItem] {
         var updated = allCurrentItems
+        var indexByPath: [String: Int] = [:]
+        for (i, item) in updated.enumerated() where indexByPath[item.originalPath] == nil {
+            indexByPath[item.originalPath] = i
+        }
         
-        // Chunk candidates in batches of 100 to avoid overly large request payloads
-        let chunkSize = 100
+        // One request per chunk so a single failed chunk doesn't discard the others' results
+        let chunkSize = NASClient.maxCheckBatchSize
         for chunkStart in stride(from: 0, to: candidates.count, by: chunkSize) {
+            guard !Task.isCancelled else { break }
             let chunkEnd = min(chunkStart + chunkSize, candidates.count)
             let batch = Array(candidates[chunkStart..<chunkEnd])
+            let startedAt = Date()
             
+            let res: IngestCheckBatchResponse
             do {
-                let res = try await nasClient.batchPreCheck(
+                res = try await nasClient.batchPreCheck(
                     sourceId: sourceId,
                     friendlyName: "Harsh's Mac",
                     platform: "macOS",
                     items: batch
                 )
-                
-                let dedupPaths = Set(res.results.filter { $0.status == "dedup_linked" }.map { $0.original_path })
-                let needUploadPaths = Set(res.results.filter { $0.status == "need_upload" }.map { $0.original_path })
-                
-                for item in batch {
-                    let path = item.originalPath
-                    if dedupPaths.contains(path) {
-                        // Found in NAS vault!
-                        cacheStore.recordItemSynced(
-                            path: path,
-                            fileSize: item.fileSize,
-                            modifiedAt: item.modifiedAt,
-                            sha256: item.sha256,
-                            album: item.albumName,
-                            isFavorite: item.isFavorite
-                        )
-                        cacheStore.logActivity(
-                            eventType: .existingDiscovered,
-                            filePath: path,
-                            filename: item.filename,
-                            details: "Existing file linked on NAS (SHA-256 match)",
-                            sourceId: sourceId
-                        )
-                        if let idx = updated.firstIndex(where: { $0.originalPath == path }) {
-                            updated[idx].syncStatus = .committed
-                        }
-                    } else if needUploadPaths.contains(path) {
-                        // Genuinely not on NAS! Revert if previously cached as committed
-                        cacheStore.updateSyncStatus(path: path, status: .uncommitted)
-                        if let idx = updated.firstIndex(where: { $0.originalPath == path }) {
-                            updated[idx].syncStatus = .uncommitted
-                        }
-                    }
-                }
+            } catch NASClientError.unauthorized {
+                print("⚠️ [NASReconciliation] Ingest pre-check rejected: API token missing or invalid")
+                break
             } catch {
                 print("⚠️ [NASReconciliation] Ingest pre-check batch failed: \(error.localizedDescription)")
+                continue
             }
-        }
-        
-        // Re-evaluate folder sync statuses after updating items
-        for i in 0..<updated.count {
-            if updated[i].isDirectory {
-                updated[i].syncStatus = LocalFileScanner.shared.evaluateFolderSyncStatus(folderPath: updated[i].originalPath)
+            
+            let dedupPaths = Set(res.results.filter { $0.status == "dedup_linked" }.map { $0.original_path })
+            let needUploadPaths = Set(res.results.filter { $0.status == "need_upload" }.map { $0.original_path })
+            
+            var linkedItems: [SynapsFileItem] = []
+            var revertedPaths: [String] = []
+            var activities: [SyncActivityItem] = []
+            
+            for item in batch {
+                let path = item.originalPath
+                if dedupPaths.contains(path) {
+                    // Found in NAS vault!
+                    linkedItems.append(item)
+                    activities.append(SyncActivityItem(
+                        eventType: .existingDiscovered,
+                        filePath: path,
+                        filename: item.filename,
+                        details: "Existing file linked on NAS (SHA-256 match)",
+                        sourceId: sourceId
+                    ))
+                    if let idx = indexByPath[path] {
+                        updated[idx].syncStatus = .committed
+                    }
+                } else if needUploadPaths.contains(path) {
+                    // Genuinely not on NAS! Revert if previously cached as committed
+                    revertedPaths.append(path)
+                    if let idx = indexByPath[path] {
+                        updated[idx].syncStatus = .uncommitted
+                    }
+                }
             }
+            
+            cacheStore.recordItemsSynced(linkedItems)
+            cacheStore.updateSyncStatuses(paths: revertedPaths, status: .uncommitted, notSyncedSince: startedAt)
+            cacheStore.logActivities(activities)
         }
         
         return updated

@@ -41,6 +41,25 @@ public struct MainView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(viewModel.isCheckingNAS)
+                        
+                        // Discovery only suggests; the saved address changes only if the user agrees
+                        if let suggestion = viewModel.discoveredNASUrl {
+                            VStack(spacing: 6) {
+                                Text("A Synaps server answered at \(suggestion).")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Button("Use \(suggestion)") {
+                                    viewModel.adoptDiscoveredNAS()
+                                }
+                                .controlSize(.small)
+                            }
+                            .padding(.top, 4)
+                        }
+                        
+                        SettingsLink {
+                            Text("Open Settings…")
+                        }
+                        .controlSize(.small)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if viewModel.selectedSidebarItem?.isPhone == true || displayMode == .grid {
@@ -79,7 +98,7 @@ public struct MainView: View {
                     // Sort Menu
                     Menu {
                         Section("Sort By") {
-                            ForEach(AppViewModel.SortField.allCases) { field in
+                            ForEach (AppViewModel.SortField.allCases) { field in
                                 Button {
                                     if viewModel.sortField != field {
                                         viewModel.sortField = field

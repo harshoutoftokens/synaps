@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-public struct SyncActivityItem: Identifiable, Codable {
+public struct SyncActivityItem: Identifiable, Codable, Sendable {
     public let id: String
     public let timestamp: Date
     public let eventType: SyncActivityType
@@ -28,7 +28,7 @@ public struct SyncActivityItem: Identifiable, Codable {
         self.sourceId = sourceId
     }
     
-    public enum SyncActivityType: String, Codable {
+    public enum SyncActivityType: String, Codable, Sendable {
         case existingDiscovered = "existing_discovered"
         case fileSynced = "file_synced"
         case folderSynced = "folder_synced"
