@@ -129,9 +129,9 @@ public struct SidebarView: View {
                                         .fontWeight(isSelected ? .bold : .medium)
                                         .foregroundColor(isSelected ? .accentColor : .primary)
                                 }
-                                Text(viewModel.nasAuthFailed ? viewModel.nasAuthMessage : viewModel.nasBaseUrl)
+                                Text(viewModel.nasBaseUrl)
                                     .font(.caption2)
-                                    .foregroundColor(viewModel.nasAuthFailed ? .orange : .secondary)
+                                    .foregroundColor(.secondary)
                             }
                             
                             Spacer()
@@ -160,14 +160,6 @@ public struct SidebarView: View {
                     .disabled(viewModel.isCheckingNAS)
                     .help(viewModel.isCheckingNAS ? "Checking NAS connection..." : "Refresh NAS connection")
                     .accessibilityLabel(viewModel.isCheckingNAS ? "Checking NAS connection" : "Refresh NAS connection")
-                    
-                    SettingsLink {
-                        Image(systemName: "gearshape")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                    .help("NAS address and API token")
-                    .accessibilityLabel("NAS settings")
                 }
                 .padding(.vertical, 4)
             }

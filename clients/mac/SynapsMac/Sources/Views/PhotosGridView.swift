@@ -244,12 +244,6 @@ public struct PhotosGridView: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .padding(.top, 4)
-                        if viewModel.nasAuthFailed {
-                            SettingsLink {
-                                Text("Open Settings…")
-                            }
-                            .controlSize(.small)
-                        }
                     }
                 }
                 Spacer()
