@@ -32,6 +32,10 @@ next-env.d.ts
 *.sqlite
 *.sqlite3
 *.db-journal
+*.db-wal
+*.db-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # 5. Media, Uploads, Thumbnails & Cache
 mock_storage/
@@ -43,6 +47,8 @@ thumbnails/
 trash/
 cache/
 .cache/
+.synaps_tmp/
+migration_plan.json
 
 # 6. Logs, Reports & Temp Files
 *.log
@@ -92,5 +98,7 @@ Icon
 xcuserdata/
 DerivedData/
 *.app/
+*.ipa
+*.dSYM/
 checkpoints/
 
