@@ -147,7 +147,7 @@ This would reduce thumbnail generation time by ~30% and thumbnail file sizes by 
 
 ### 2. Use Single Worker in uvicorn
 
-Already done in `start-prod.sh`:
+Already done in the systemd unit installed by `./synaps install` (`python main.py` runs one uvicorn worker):
 ```bash
 uvicorn main:app --workers 1
 ```

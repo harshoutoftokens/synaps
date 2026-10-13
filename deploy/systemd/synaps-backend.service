@@ -1,0 +1,23 @@
+# Installed by ./synaps install (placeholders filled in). Edit the template, not /etc/systemd/system.
+[Unit]
+Description=Synaps NAS backend (API + web app)
+Wants=network-online.target
+After=network-online.target local-fs.target
+# Never start against an unmounted storage disk (an empty mount point looks like "everything deleted")
+RequiresMountsFor=@STORAGE@
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@ROOT@/backend
+EnvironmentFile=-@ROOT@/backend/.env
+ExecStart=@ROOT@/backend/venv/bin/python main.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+# One worker on a dual-core: keep the box responsive for SSH and the update job
+Nice=-2
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target

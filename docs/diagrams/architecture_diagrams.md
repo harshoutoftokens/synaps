@@ -33,8 +33,8 @@ graph TB
         IPHONE[iPhone\nfor uploads]
     end
 
-    DEV -->|./deploy.sh| GIT
-    GIT -->|./update.sh git pull| NAS
+    DEV -->|merge PR, CI passes| GIT
+    GIT -->|synaps-update.timer pulls| NAS
 
     BROWSER -->|HTTP :3000| FE
     IPHONE -->|HTTP :3000| FE
@@ -327,20 +327,14 @@ sequenceDiagram
     participant GIT as Git Remote
     participant NAS as NAS Server
 
-    DEV->>DEV: Edit code + test locally
-    DEV->>GIT: ./deploy.sh "message"
-    Note over DEV,GIT: git add . && git commit && git push
-
-    DEV->>NAS: ssh user@nas-ip
-    NAS->>GIT: git pull origin main
-    NAS->>NAS: cd backend && pip install -r requirements.txt
-    NAS->>NAS: cd frontend && npm install
-    NAS->>NAS: npm run build (1-5 min)
-    NAS->>NAS: systemctl restart synaps-backend
-    NAS->>NAS: systemctl restart synaps-frontend
-    NAS-->>DEV: ✅ Update complete
-
-    Note over NAS: Backend restarts → auto-scan runs
+    DEV->>DEV: Edit code + ./synaps test
+    DEV->>GIT: push branch, open PR, merge after CI passes
+    loop every 5 min (synaps-update.timer)
+        NAS->>GIT: git fetch + read CI check-runs
+    end
+    NAS->>NAS: back up DB, pip install / npm build only if changed
+    NAS->>NAS: systemctl restart synaps-backend + health check
+    NAS->>NAS: roll back automatically on failure
     Note over NAS: Frontend serves new build
 ```
 

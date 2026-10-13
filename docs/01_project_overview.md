@@ -140,10 +140,9 @@ nas_dashboard/
 │           ├── api.ts      ← All backend API calls
 │           └── store.ts    ← Global state (Zustand)
 │
-├── start.sh                ← Start both services (development)
-├── start-prod.sh           ← Start both services (production)
-├── deploy.sh               ← Push code to Git
-├── update.sh               ← Pull + rebuild on NAS
+├── synaps                  ← One tool: install, dev, test, update, deploy, status, logs
+├── deploy/                 ← systemd units, sudoers rule, Bonjour (avahi) service templates
+├── .github/workflows/ci.yml← CI: backend tests, web build, Mac + iOS builds
 └── mock_storage/           ← Local fake NAS files for development
 ```
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Advertises Synaps on the LAN (Bonjour) so the Mac and iPhone apps can find the NAS. -->
+<service-group>
+  <name replace-wildcards="yes">Synaps on %h</name>
+  <service>
+    <type>_synaps._tcp</type>
+    <port>@PORT@</port>
+    <txt-record>path=/api/health</txt-record>
+  </service>
+  <service>
+    <type>_http._tcp</type>
+    <port>@PORT@</port>
+    <txt-record>path=/</txt-record>
+  </service>
+</service-group>

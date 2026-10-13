@@ -1,0 +1,504 @@
+#!/usr/bin/env bash
+# synaps - one tool to install, run, update and deploy Synaps.
+#
+# On the NAS (Linux):
+#   ./synaps install          first-time setup: packages, venv, web app, systemd services,
+#                             auto-update timer, mDNS (homecloud1.local) for the Mac/iPhone apps
+#   ./synaps update           pull origin/<branch> if CI passed, rebuild only what changed,
+#                             restart, health-check, roll back automatically on failure
+#                             (the synaps-update.timer runs this every 5 minutes)
+#   ./synaps status | logs | restart | stop | start | rollback | doctor
+#
+# On your Mac (development):
+#   ./synaps dev              backend (:8000) + Next.js dev server (:3000), Ctrl+C stops both
+#   ./synaps test             backend tests, web lint/build, Mac client tests
+#   ./synaps deploy           ask the NAS to update right now (over SSH) instead of waiting
+#   ./synaps mac              build SynapsMac.app and open it
+#   ./synaps ios              open the iPhone app in Xcode
+#
+# Settings (environment variables, or KEY=value lines in a git-ignored .synaps.local file):
+#   SYNAPS_BRANCH=main               branch the NAS follows
+#   SYNAPS_REQUIRE_CI=1              only deploy commits whose GitHub checks all passed
+#   SYNAPS_WEB_MODE=static           static: backend serves the web app (no Node server, saves RAM)
+#                                    node:   run the Next.js server as synaps-frontend on :3000
+#   SYNAPS_NAS=user@homecloud1.local SSH target for `./synaps deploy`
+#   SYNAPS_NAS_DIR=nas_dashboard     repo path on the NAS (relative to the SSH user's home)
+# Backend settings (storage path, API token, ...) live in backend/.env - see backend/.env.example.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+[ -f .synaps.local ] && set -a && . ./.synaps.local && set +a
+
+BRANCH="${SYNAPS_BRANCH:-main}"
+REQUIRE_CI="${SYNAPS_REQUIRE_CI:-1}"
+WEB_MODE="${SYNAPS_WEB_MODE:-static}"
+BACKEND="$ROOT/backend"
+FRONTEND="$ROOT/frontend"
+VENV="$BACKEND/venv"
+WEB_LIVE="$FRONTEND/live"          # the static web app the backend serves (swapped in atomically)
+STATE_DIR="$BACKEND/.deploy"        # last good revision, DB backups, update lock (git-ignored)
+UNITS="synaps-backend.service synaps-update.service synaps-update.timer"
+
+# ── output ────────────────────────────────────────────────────────────────────
+if [ -t 1 ]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; N=$'\e[0m'; else B='' G='' Y='' R='' N=''; fi
+say()  { printf '%s\n' "${B}==>${N} $*"; }
+ok()   { printf '%s\n' "${G}ok${N}  $*"; }
+warn() { printf '%s\n' "${Y}warn${N} $*" >&2; }
+die()  { printf '%s\n' "${R}error${N} $*" >&2; exit 1; }
+
+is_linux() { [ "$(uname -s)" = Linux ]; }
+need_linux() { is_linux || die "'$1' runs on the NAS (Linux). From your Mac use: ./synaps deploy"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ── backend/.env helpers ──────────────────────────────────────────────────────
+env_get() {  # env_get KEY [default] - environment first, then backend/.env
+    local key=$1 def=${2-} val=""
+    val=$(printenv "$key" 2>/dev/null || true)
+    if [ -z "$val" ] && [ -f "$BACKEND/.env" ]; then
+        val=$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}${key}[[:space:]]*=[[:space:]]*//p" "$BACKEND/.env" \
+            | tail -n 1 | tr -d "\"'")
+    fi
+    printf '%s' "${val:-$def}"
+}
+env_set() {  # env_set KEY VALUE - replace or append in backend/.env
+    local key=$1 val=$2 f="$BACKEND/.env"
+    touch "$f"
+    if grep -q "^[[:space:]]*$key=" "$f"; then
+        local tmp; tmp=$(mktemp)
+        awk -v k="$key" -v v="$val" 'BEGIN{FS=OFS="="} $0 ~ "^[[:space:]]*"k"=" {print k"="v; next} {print}' "$f" > "$tmp"
+        cat "$tmp" > "$f"; rm -f "$tmp"
+    else
+        printf '%s=%s\n' "$key" "$val" >> "$f"
+    fi
+}
+port() { env_get SYNAPS_PORT 8000; }
+health_url() { echo "http://127.0.0.1:$(port)/api/health"; }
+
+db_path() {  # the SQLite file the backend uses (SYNAPS_DB_URL or backend/synaps.db)
+    local url; url=$(env_get SYNAPS_DB_URL "")
+    case "$url" in
+        "") echo "$BACKEND/synaps.db" ;;
+        sqlite:////*) echo "/${url#sqlite:////}" ;;
+        sqlite:///*) echo "$BACKEND/${url#sqlite:///}" ;;
+        *) echo "" ;;
+    esac
+}
+
+# ── privileged helpers ────────────────────────────────────────────────────────
+SUDO=""
+[ "$(id -u)" -ne 0 ] && SUDO="sudo"
+SYSTEMCTL="$(command -v systemctl 2>/dev/null || echo /usr/bin/systemctl)"
+
+restart_unit() {  # non-interactive restart, allowed by /etc/sudoers.d/synaps
+    if [ "$(id -u)" -eq 0 ]; then "$SYSTEMCTL" restart "$1"; else sudo -n "$SYSTEMCTL" restart "$1"; fi
+}
+unit_exists() { "$SYSTEMCTL" list-unit-files "$1" >/dev/null 2>&1 && "$SYSTEMCTL" list-unit-files "$1" | grep -q "^$1"; }
+
+wait_healthy() {  # wait_healthy [seconds]
+    local secs=${1:-60} url; url=$(health_url)
+    for _ in $(seq 1 "$secs"); do
+        if curl -fsS -m 3 "$url" >/dev/null 2>&1; then return 0; fi
+        sleep 1
+    done
+    return 1
+}
+
+# ── build steps (each is safe to re-run) ──────────────────────────────────────
+backend_deps() {
+    say "Backend dependencies"
+    [ -d "$VENV" ] || python3 -m venv "$VENV" || return 1
+    "$VENV/bin/pip" install -q --upgrade pip || return 1
+    "$VENV/bin/pip" install -q -r "$BACKEND/requirements.txt" || return 1
+    ok "backend/venv up to date"
+}
+
+backend_check() {  # the new code must import before anything is restarted
+    (cd "$BACKEND" && "$VENV/bin/python" -c "import main" >/dev/null)
+}
+
+web_build() {  # returns non-zero on failure; the live web app is only replaced after a good build
+    have npm || { warn "Node.js/npm not found - install Node 18+ to build the web app"; return 1; }
+    say "Web app ($WEB_MODE mode)"
+    (
+        cd "$FRONTEND" || exit 1
+        # The NAS has 2 GB RAM: cap Node's heap and stay polite to the running backend.
+        export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1024}" NEXT_TELEMETRY_DISABLED=1
+        nice -n 10 npm ci --no-audit --no-fund --loglevel=error || exit 1
+        if [ "$WEB_MODE" = static ]; then nice -n 10 npm run -s build:static; else nice -n 10 npm run -s build; fi
+    ) || { warn "web app build failed"; return 1; }
+    if [ "$WEB_MODE" = static ]; then
+        [ -f "$FRONTEND/out/index.html" ] || { warn "static build produced no frontend/out/index.html"; return 1; }
+        rm -rf "$WEB_LIVE.new" "$WEB_LIVE.old"
+        cp -a "$FRONTEND/out" "$WEB_LIVE.new" || return 1
+        if [ -d "$WEB_LIVE" ]; then mv "$WEB_LIVE" "$WEB_LIVE.old"; fi
+        mv "$WEB_LIVE.new" "$WEB_LIVE" || return 1
+        rm -rf "$WEB_LIVE.old"
+        env_set SYNAPS_FRONTEND_DIST "$WEB_LIVE"
+    fi
+    ok "web app built"
+}
+
+backup_db() {
+    local db; db=$(db_path)
+    [ -n "$db" ] && [ -f "$db" ] || return 0
+    mkdir -p "$STATE_DIR/backups"
+    local dest
+    dest="$STATE_DIR/backups/synaps-$(date +%Y%m%d-%H%M%S).db"
+    # sqlite3's online backup is consistent even while the backend is writing (WAL mode)
+    "$VENV/bin/python" - "$db" "$dest" <<'PY'
+import sqlite3, sys
+src = sqlite3.connect(sys.argv[1]); dst = sqlite3.connect(sys.argv[2])
+with dst:
+    src.backup(dst)
+src.close(); dst.close()
+PY
+    ls -1t "$STATE_DIR"/backups/synaps-*.db 2>/dev/null | tail -n +6 | xargs -r rm -f   # keep 5
+    ok "database backed up to ${dest#$ROOT/}"
+}
+
+restart_services() {
+    say "Restarting services"
+    restart_unit synaps-backend.service || return 1
+    if [ "$WEB_MODE" = node ] && unit_exists synaps-frontend.service; then
+        restart_unit synaps-frontend.service || return 1
+    fi
+    wait_healthy 60 || { warn "backend did not answer $(health_url) within 60 s"; return 1; }
+    ok "backend healthy at $(health_url)"
+}
+
+changed() {  # changed FROM TO PATH... - did any of these paths change between two revisions?
+    local from=$1 to=$2; shift 2
+    [ "$from" = "$to" ] && return 1
+    ! git diff --quiet "$from" "$to" -- "$@"
+}
+
+# Bring the working tree to revision TO (coming from FROM) and rebuild only what changed.
+apply_revision() {
+    local from=$1 to=$2
+    git -c advice.detachedHead=false checkout -q -B "$BRANCH" "$to" || return 1
+    if changed "$from" "$to" backend/requirements.txt || [ ! -x "$VENV/bin/python" ]; then
+        backend_deps || return 1
+    fi
+    # Check the backend first: it takes seconds, the web build takes minutes on the NAS.
+    backend_check || { warn "backend does not import at $(git rev-parse --short "$to")"; return 1; }
+    if changed "$from" "$to" frontend || { [ "$WEB_MODE" = static ] && [ ! -f "$WEB_LIVE/index.html" ]; }; then
+        web_build || return 1
+    fi
+}
+
+# ── CI gate: deploy only commits whose GitHub checks passed ────────────────────
+github_repo() {
+    git remote get-url origin 2>/dev/null | sed -n 's#.*github\.com[:/]\([^/]*/[^/.]*\)\(\.git\)\{0,1\}$#\1#p'
+}
+ci_state() {  # prints success | pending | failure | unknown for a commit
+    local sha=$1 repo; repo=$(github_repo)
+    [ -n "$repo" ] && have curl || { echo unknown; return; }
+    curl -fsS -m 15 -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$repo/commits/$sha/check-runs?per_page=100" 2>/dev/null \
+    | python3 -c '
+import json, sys
+try:
+    runs = json.load(sys.stdin).get("check_runs", [])
+except Exception:
+    print("unknown"); sys.exit()
+if not runs:
+    print("pending"); sys.exit()
+if any(r["status"] != "completed" for r in runs):
+    print("pending"); sys.exit()
+bad = [r["name"] for r in runs if r["conclusion"] not in ("success", "skipped", "neutral")]
+print("failure " + ", ".join(bad) if bad else "success")
+' || echo unknown
+}
+
+# ── commands ──────────────────────────────────────────────────────────────────
+cmd_install() {
+    need_linux install
+    local storage; storage=$(env_get SYNAPS_STORAGE_PATH "")
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --storage) storage=$2; shift 2 ;;
+            --web) WEB_MODE=$2; shift 2 ;;
+            *) die "unknown option $1 (install [--storage /path] [--web static|node])" ;;
+        esac
+    done
+    local user; user=$(id -un)
+    [ "$user" != root ] || die "run install as the normal NAS user (it uses sudo where needed)"
+
+    say "System packages"
+    if have apt-get; then
+        $SUDO apt-get update -qq
+        $SUDO apt-get install -y -qq git curl python3 python3-venv python3-pip ffmpeg libheif1 avahi-daemon \
+            || warn "some packages failed to install - video thumbnails need ffmpeg, discovery needs avahi-daemon"
+        if [ "$WEB_MODE" = node ] || ! have npm; then
+            have npm || warn "Node.js is not installed: install Node 18+ (e.g. from nodesource) to build the web app"
+        fi
+    else
+        warn "no apt-get: install git, curl, python3-venv, ffmpeg, avahi-daemon and Node 18+ yourself"
+    fi
+    python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || die "Python 3.10+ is required ($(python3 --version 2>&1))"
+
+    say "Configuration (backend/.env)"
+    if [ ! -f "$BACKEND/.env" ]; then
+        cp "$BACKEND/.env.example" "$BACKEND/.env"
+        ok "created backend/.env from .env.example"
+    fi
+    if [ -z "$storage" ]; then
+        if [ -d /storage ]; then storage=/storage; else die "where is your storage? ./synaps install --storage /path/to/storage"; fi
+    fi
+    [ -d "$storage" ] || die "storage path $storage does not exist (mount the disk first)"
+    env_set SYNAPS_STORAGE_PATH "$storage"
+    ok "storage: $storage"
+    printf 'SYNAPS_WEB_MODE=%s\nSYNAPS_BRANCH=%s\n' "$WEB_MODE" "$BRANCH" > "$ROOT/.synaps.local.new"
+    if [ -f "$ROOT/.synaps.local" ]; then rm -f "$ROOT/.synaps.local.new"; else mv "$ROOT/.synaps.local.new" "$ROOT/.synaps.local"; fi
+
+    backend_deps || die "pip install failed - see the error above"
+    backend_check || die "backend does not import - see the error above"
+    web_build || die "web app build failed - see the error above"
+
+    say "systemd services"
+    local tmp; tmp=$(mktemp -d)
+    for unit in $UNITS synaps-frontend.service; do
+        sed -e "s#@USER@#$user#g" -e "s#@ROOT@#$ROOT#g" -e "s#@STORAGE@#$storage#g" \
+            -e "s#@NPM@#$(command -v npm 2>/dev/null || echo /usr/bin/npm)#g" \
+            -e "s#@PATH@#$(dirname "$(command -v npm 2>/dev/null || echo /usr/bin/npm)"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin#g" \
+            "$ROOT/deploy/systemd/$unit" > "$tmp/$unit"
+    done
+    for unit in $UNITS; do
+        [ -f "/etc/systemd/system/$unit" ] && ! cmp -s "$tmp/$unit" "/etc/systemd/system/$unit" \
+            && $SUDO cp "/etc/systemd/system/$unit" "/etc/systemd/system/$unit.bak-$(date +%Y%m%d%H%M%S)"
+        $SUDO install -m 0644 "$tmp/$unit" "/etc/systemd/system/$unit"
+    done
+    if [ "$WEB_MODE" = node ]; then
+        $SUDO install -m 0644 "$tmp/synaps-frontend.service" /etc/systemd/system/synaps-frontend.service
+    fi
+
+    # Let the update timer (running as $user) restart the services - and nothing else - without a password.
+    sed -e "s#@USER@#$user#g" -e "s#@SYSTEMCTL@#$SYSTEMCTL#g" "$ROOT/deploy/sudoers.synaps" > "$tmp/sudoers"
+    $SUDO visudo -cf "$tmp/sudoers" >/dev/null || die "generated sudoers file is invalid"
+    $SUDO install -m 0440 "$tmp/sudoers" /etc/sudoers.d/synaps
+
+    # Advertise the NAS over Bonjour/mDNS so the Mac and iPhone apps find it on the LAN.
+    if [ -d /etc/avahi ]; then
+        sed -e "s#@PORT@#$(port)#g" "$ROOT/deploy/avahi/synaps.service" > "$tmp/avahi"
+        $SUDO install -D -m 0644 "$tmp/avahi" /etc/avahi/services/synaps.service
+        $SUDO "$SYSTEMCTL" enable --now avahi-daemon >/dev/null 2>&1 || warn "could not start avahi-daemon"
+        ok "mDNS: $(hostname).local, service _synaps._tcp on port $(port)"
+    fi
+    rm -rf "$tmp"
+
+    $SUDO "$SYSTEMCTL" daemon-reload
+    if [ "$WEB_MODE" = static ] && unit_exists synaps-frontend.service; then
+        # The backend now serves the web app on :$(port); the Node server only costs RAM.
+        $SUDO "$SYSTEMCTL" disable --now synaps-frontend.service >/dev/null 2>&1 || true
+        ok "disabled synaps-frontend (web app is now served on port $(port))"
+    fi
+    $SUDO "$SYSTEMCTL" enable --now synaps-backend.service synaps-update.timer
+    if [ "$WEB_MODE" = node ]; then $SUDO "$SYSTEMCTL" enable --now synaps-frontend.service; fi
+    restart_unit synaps-backend.service
+
+    # Open the API port to the LAN only, when ufw is in use.
+    if have ufw && $SUDO ufw status 2>/dev/null | grep -q "Status: active"; then
+        for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+            $SUDO ufw allow from "$net" to any port "$(port)" proto tcp comment synaps >/dev/null
+        done
+        ok "ufw: port $(port) open to private networks"
+    fi
+
+    mkdir -p "$STATE_DIR"
+    wait_healthy 90 || die "backend did not become healthy - ./synaps logs"
+    git rev-parse HEAD > "$STATE_DIR/last-good"
+    ok "Synaps is running: http://$(hostname).local:$(port)  (updates every 5 min from origin/$BRANCH)"
+    [ -n "$(env_get SYNAPS_API_TOKEN "")" ] || warn "no API token set - anyone on your Wi-Fi can use Synaps. See SYNAPS_API_TOKEN in backend/.env"
+}
+
+cmd_update() {
+    need_linux update
+    local force=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --force) force=1; shift ;;
+            --now) shift ;;  # same as no flag; kept for `./synaps deploy`
+            *) die "unknown option $1 (update [--force])" ;;
+        esac
+    done
+    mkdir -p "$STATE_DIR"
+    exec 9>"$STATE_DIR/update.lock"
+    flock -n 9 || { echo "another update is running"; exit 0; }
+
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        die "the NAS checkout has local changes to tracked files - commit them elsewhere or 'git stash' them; not updating"
+    fi
+
+    git fetch -q origin "$BRANCH"
+    local cur new; cur=$(git rev-parse HEAD); new=$(git rev-parse "origin/$BRANCH")
+    if [ "$cur" = "$new" ]; then echo "up to date ($(git log -1 --format='%h %s' "$cur"))"; exit 0; fi
+    if [ "$force" = 0 ] && [ "$(cat "$STATE_DIR/failed" 2>/dev/null)" = "$new" ]; then
+        echo "$(git rev-parse --short "$new") failed to deploy earlier - waiting for a newer commit (./synaps update --force retries)"
+        exit 0
+    fi
+    git merge-base --is-ancestor "$cur" "$new" || [ "$force" = 1 ] \
+        || die "origin/$BRANCH is not a fast-forward of $(git rev-parse --short "$cur") (history rewritten?) - run './synaps update --force' to follow it"
+
+    if [ "$REQUIRE_CI" = 1 ] && [ "$force" = 0 ]; then
+        local ci; ci=$(ci_state "$new")
+        case "$ci" in
+            success) ok "CI passed for $(git rev-parse --short "$new")" ;;
+            pending) echo "CI still running for $(git rev-parse --short "$new") - will deploy once it passes"; exit 0 ;;
+            failure*) warn "CI failed for $(git rev-parse --short "$new") (${ci#failure }) - not deploying"; exit 0 ;;
+            *) warn "could not read CI status from GitHub - not deploying (./synaps update --force overrides)"; exit 0 ;;
+        esac
+    fi
+
+    say "Updating $(git rev-parse --short "$cur") -> $(git rev-parse --short "$new")"
+    git log --format='    %h %s' "$cur..$new" | head -20
+    changed "$cur" "$new" backend && backup_db
+
+    local restarted=0
+    if apply_revision "$cur" "$new"; then
+        restarted=1
+        if restart_services; then
+            echo "$new" > "$STATE_DIR/last-good"
+            rm -f "$STATE_DIR/failed"
+            ok "deployed $(git log -1 --format='%h %s' "$new")"
+            return 0
+        fi
+    fi
+
+    echo "$new" > "$STATE_DIR/failed"
+    warn "update failed - rolling back to $(git rev-parse --short "$cur")"
+    apply_revision "$new" "$cur" || warn "the previous revision does not import either - check ./synaps logs"
+    # The running backend still has the old code unless we restarted it onto the new one
+    if [ "$restarted" = 1 ]; then
+        restart_services || warn "backend is not healthy after rollback - check ./synaps logs"
+    fi
+    die "deploy of $(git rev-parse --short "$new") failed and was rolled back; the timer skips it until a newer commit lands"
+}
+
+cmd_rollback() {
+    need_linux rollback
+    local target=${1:-}
+    if [ -z "$target" ]; then
+        target=$(git rev-parse HEAD~1)
+        warn "no revision given, rolling back one commit to $(git rev-parse --short "$target")"
+    fi
+    mkdir -p "$STATE_DIR"; exec 9>"$STATE_DIR/update.lock"; flock -n 9 || die "an update is running"
+    local cur; cur=$(git rev-parse HEAD); target=$(git rev-parse "$target")
+    apply_revision "$cur" "$target" && restart_services || die "rollback failed - ./synaps logs"
+    echo "$target" > "$STATE_DIR/last-good"
+    git rev-parse "origin/$BRANCH" > "$STATE_DIR/failed"   # don't jump straight back to the commit we left
+    warn "NAS pinned at $(git rev-parse --short "$target"). The timer moves forward again when origin/$BRANCH gets a newer commit;"
+    warn "to stay here regardless: sudo systemctl stop synaps-update.timer"
+}
+
+cmd_status() {
+    if is_linux && have systemctl; then
+        "$SYSTEMCTL" --no-pager --lines=0 status $UNITS 2>/dev/null | grep -E '^●|Active:|Trigger:' || true
+    fi
+    printf 'revision: %s\n' "$(git log -1 --format='%h %s (%cr)')"
+    [ -f "$STATE_DIR/last-good" ] && printf 'last good deploy: %s\n' "$(git log -1 --format='%h %s' "$(cat "$STATE_DIR/last-good")" 2>/dev/null)"
+    if curl -fsS -m 3 "$(health_url)" >/dev/null 2>&1; then ok "health: $(health_url)"; else warn "health: no answer from $(health_url)"; fi
+}
+
+cmd_logs() {
+    need_linux logs
+    journalctl -u synaps-backend -u synaps-update -u synaps-frontend -n "${1:-100}" --no-pager
+}
+
+cmd_doctor() {
+    local bad=0
+    check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else warn "$1 - $3"; bad=1; fi; }
+    check "python 3.10+" "python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'" "install python3.10 or newer"
+    check "backend venv" "[ -x '$VENV/bin/python' ]" "run ./synaps install (NAS) or ./synaps dev (Mac)"
+    check "backend imports" "backend_check" "see: cd backend && venv/bin/python -c 'import main'"
+    check "ffmpeg (video thumbnails)" "have ffmpeg" "sudo apt-get install ffmpeg"
+    # Encode and decode a tiny HEIC: catches pillow-heif builds this CPU can't run (Core 2 Duo, no AVX).
+    check "HEIC decode on this CPU" "'$VENV/bin/python' -c 'from PIL import Image; import pillow_heif, io; pillow_heif.register_heif_opener(); b=io.BytesIO(); Image.new(\"RGB\",(16,16)).save(b,format=\"HEIF\"); b.seek(0); Image.open(b).load()'" \
+        "pin an older pillow-heif in backend/requirements.txt"
+    local storage; storage=$(env_get SYNAPS_STORAGE_PATH "$ROOT/mock_storage")
+    check "storage $storage" "[ -d '$storage' ] && [ -n \"\$(ls -A '$storage')\" ]" "missing or empty - is the disk mounted?"
+    if [ -d "$storage" ]; then
+        local free; free=$(df -Pk "$storage" | awk 'NR==2 {print int($4/1048576)}')
+        check "free space ${free} GiB" "[ $free -ge 2 ]" "less than 2 GiB free"
+    fi
+    check "backend answering" "curl -fsS -m 3 '$(health_url)'" "not running? ./synaps status"
+    if is_linux; then
+        check "update timer active" "$SYSTEMCTL is-active synaps-update.timer" "sudo systemctl enable --now synaps-update.timer"
+        check "mDNS (avahi) running" "$SYSTEMCTL is-active avahi-daemon" "sudo apt-get install avahi-daemon"
+        check "passwordless restart" "sudo -n -l '$SYSTEMCTL' restart synaps-backend.service" "re-run ./synaps install"
+    fi
+    [ -n "$(env_get SYNAPS_API_TOKEN "")" ] && ok "API token set" || warn "API token not set (SYNAPS_API_TOKEN in backend/.env)"
+    return $bad
+}
+
+cmd_dev() {
+    [ -x "$VENV/bin/python" ] || backend_deps || die "pip install failed"
+    [ -d "$FRONTEND/node_modules" ] || (cd "$FRONTEND" && npm ci --no-audit --no-fund)
+    say "backend http://localhost:$(port)   web http://localhost:3000   (Ctrl+C stops both)"
+    (cd "$BACKEND" && exec "$VENV/bin/python" main.py) & local bpid=$!
+    (cd "$FRONTEND" && exec npm run dev) & local fpid=$!
+    trap 'kill $bpid $fpid 2>/dev/null; wait 2>/dev/null; exit 0' INT TERM
+    wait
+}
+
+cmd_test() {
+    [ -x "$VENV/bin/python" ] || backend_deps || die "pip install failed"
+    say "Backend tests"
+    "$VENV/bin/pip" install -q -r "$BACKEND/requirements-dev.txt"
+    (cd "$BACKEND" && "$VENV/bin/python" -m pytest)
+    if have npm; then
+        say "Web app lint + static build"
+        (cd "$FRONTEND" && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run -s lint && npm run -s build:static)
+    fi
+    if have swift && [ "$(uname -s)" = Darwin ]; then
+        say "Mac client tests"
+        (cd "$ROOT/clients/mac/SynapsMac" && swift test)
+    fi
+    ok "all tests passed"
+}
+
+cmd_deploy() {
+    local nas=${SYNAPS_NAS:-} dir=${SYNAPS_NAS_DIR:-nas_dashboard}
+    [ -n "$nas" ] || die "set SYNAPS_NAS (e.g. SYNAPS_NAS=you@homecloud1.local in .synaps.local)"
+    if [ "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" ] && [ -n "$(git log "origin/$BRANCH..HEAD" 2>/dev/null)" ]; then
+        warn "local $BRANCH has commits that are not on GitHub yet - the NAS only deploys what is pushed (and merged)"
+    fi
+    say "Asking $nas to update"
+    ssh -t "$nas" "cd $(printf '%q' "$dir") && ./synaps update $*"
+}
+
+cmd_mac() {
+    [ "$(uname -s)" = Darwin ] || die "the Mac app builds on macOS"
+    (cd "$ROOT/clients/mac/SynapsMac" && ./bundle_app.sh)
+    open "$ROOT/clients/mac/SynapsMac/SynapsMac.app"
+}
+
+cmd_ios() {
+    [ "$(uname -s)" = Darwin ] || die "the iPhone app builds on macOS with Xcode"
+    open "$ROOT/clients/ios/SynapsiOS/SynapsiOS.xcodeproj"
+    echo "In Xcode: pick your iPhone as the run destination, set your Team under Signing, then Run (Cmd+R)."
+}
+
+usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; }
+
+cmd=${1:-help}; [ $# -gt 0 ] && shift
+case "$cmd" in
+    install)  cmd_install "$@" ;;
+    update)   cmd_update "$@" ;;
+    rollback) cmd_rollback "$@" ;;
+    status)   cmd_status ;;
+    logs)     cmd_logs "$@" ;;
+    restart)  need_linux restart; restart_services ;;
+    start)    need_linux start; $SUDO "$SYSTEMCTL" start synaps-backend.service synaps-update.timer ;;
+    stop)     need_linux stop; $SUDO "$SYSTEMCTL" stop synaps-update.timer synaps-backend.service ;;
+    doctor)   cmd_doctor ;;
+    dev)      cmd_dev ;;
+    test)     cmd_test ;;
+    deploy)   cmd_deploy "$@" ;;
+    mac)      cmd_mac ;;
+    ios)      cmd_ios ;;
+    help|-h|--help) usage ;;
+    *) usage; exit 1 ;;
+esac
