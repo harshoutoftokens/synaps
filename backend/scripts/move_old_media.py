@@ -6,10 +6,10 @@ Moves all actual photo/video FILES from old year folders (2008-2023)
 into a single flat Old_Photos/ folder. No subfolders inside Old_Photos/.
 
 Usage:
-    python move_old_media.py --dry-run                         # Preview
-    python move_old_media.py --dry-run --cutoff 2023           # Custom cutoff
-    python move_old_media.py --execute                         # Move for real
-    python move_old_media.py --execute --path /storage/...     # NAS path
+    python scripts/move_old_media.py --dry-run                         # Preview
+    python scripts/move_old_media.py --dry-run --cutoff 2023           # Custom cutoff
+    python scripts/move_old_media.py --execute                         # Move for real
+    python scripts/move_old_media.py --execute --path /storage/...     # NAS path
 
 Safety:
     - Never deletes files
@@ -28,6 +28,9 @@ import shutil
 import logging
 import argparse
 from pathlib import Path
+
+# Make the backend modules (config, database, ...) importable however this script is started
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ALLOWED_SCAN_PATHS, ALL_MEDIA_EXTENSIONS, STORAGE_PATH
 
@@ -240,7 +243,7 @@ def move_old_media(
 
     if dry_run:
         logger.info(f"\n  This was a DRY RUN. No files were moved.")
-        logger.info(f"  To execute, run:  python move_old_media.py --execute\n")
+        logger.info(f"  To execute, run:  python scripts/move_old_media.py --execute\n")
 
     return stats
 
@@ -305,10 +308,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python move_old_media.py --dry-run                    Preview (cutoff: 2024)
-  python move_old_media.py --dry-run --cutoff 2023      Only before 2023 is "old"
-  python move_old_media.py --execute                    Move for real
-  python move_old_media.py --execute --path /storage/Vault/Harsh/Iphone
+  python scripts/move_old_media.py --dry-run                    Preview (cutoff: 2024)
+  python scripts/move_old_media.py --dry-run --cutoff 2023      Only before 2023 is "old"
+  python scripts/move_old_media.py --execute                    Move for real
+  python scripts/move_old_media.py --execute --path /storage/Vault/Harsh/Iphone
 
 Result:
   /Iphone/2008/01/photo.jpg  →  /Iphone/Old_Photos/photo.jpg

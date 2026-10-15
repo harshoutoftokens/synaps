@@ -12,9 +12,9 @@ IMPORTANT:
     timeline grouping perfectly.
 
 Usage:
-    python organize_existing_media.py --dry-run      # Preview only
-    python organize_existing_media.py --execute       # Actually move files
-    python organize_existing_media.py --dry-run --verbose   # Detailed preview
+    python scripts/organize_existing_media.py --dry-run      # Preview only
+    python scripts/organize_existing_media.py --execute       # Actually move files
+    python scripts/organize_existing_media.py --dry-run --verbose   # Detailed preview
 
 After running --execute, restart Synaps backend and it will rescan
 automatically. Existing thumbnails are preserved (path-hash based).
@@ -41,6 +41,9 @@ from pathlib import Path
 # ── Import Synaps internals ──────────────────────────────────────────────
 # This script lives in backend/ alongside scanner.py, config.py, etc.
 # We import directly to guarantee identical date logic.
+
+# Make the backend modules (config, database, ...) importable however this script is started
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ALLOWED_SCAN_PATHS, ALL_MEDIA_EXTENSIONS, STORAGE_PATH
 from scanner import (
@@ -340,7 +343,7 @@ def organize(base_dir: str, dry_run: bool = True, update_db: bool = True) -> dic
 
     if dry_run:
         logger.info(f"\n  This was a DRY RUN. No files were moved.")
-        logger.info(f"  To execute, run:  python organize_existing_media.py --execute\n")
+        logger.info(f"  To execute, run:  python scripts/organize_existing_media.py --execute\n")
 
     return stats
 
@@ -353,10 +356,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python organize_existing_media.py --dry-run             Preview changes
-  python organize_existing_media.py --dry-run --verbose   Detailed preview
-  python organize_existing_media.py --execute             Move files for real
-  python organize_existing_media.py --execute --no-db     Move without DB update
+  python scripts/organize_existing_media.py --dry-run             Preview changes
+  python scripts/organize_existing_media.py --dry-run --verbose   Detailed preview
+  python scripts/organize_existing_media.py --execute             Move files for real
+  python scripts/organize_existing_media.py --execute --no-db     Move without DB update
 
 Safety:
   - Always run --dry-run first to verify
