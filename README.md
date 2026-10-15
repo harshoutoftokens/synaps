@@ -2,207 +2,171 @@
 
 # Synaps
 
-**Self-hosted personal media cloud & native macOS desktop client for Network Attached Storage.**
+**A self-hosted photo and file cloud for a home NAS, with native Mac and iPhone apps.**
 
-Browse, organize, stream, and synchronize your photos, videos, and files with zero cloud subscriptions and complete privacy.
+Back up your iPhone and Mac to a computer you own, browse everything from either device, and see at a glance what is already safe on the NAS. No subscriptions, nothing leaves your network.
 
-[![Version](https://img.shields.io/badge/version-v2.0-blue?style=flat-square)](VERSIONING.md)
-[![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](backend/)
-[![Next.js](https://img.shields.io/badge/frontend-Next.js_14-black?style=flat-square&logo=next.js&logoColor=white)](frontend/)
-[![macOS](https://img.shields.io/badge/macOS-SwiftUI_Native-FF3B30?style=flat-square&logo=apple&logoColor=white)](clients/mac/SynapsMac/)
-[![iOS](https://img.shields.io/badge/iOS-SwiftUI_Native-FF2D55?style=flat-square&logo=apple&logoColor=white)](clients/ios/SynapsiOS/)
-[![SQLite](https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](backend/database.py)
-[![License](https://img.shields.io/badge/license-MIT_/_Personal-success?style=flat-square)](LICENSE)
+[![CI](https://github.com/harshoutoftokens/synaps/actions/workflows/ci.yml/badge.svg)](https://github.com/harshoutoftokens/synaps/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-v2.2-blue?style=flat-square)](docs/project/versioning.md)
+[![Backend](https://img.shields.io/badge/backend-FastAPI_%2B_SQLite-009688?style=flat-square&logo=fastapi&logoColor=white)](backend/)
+[![macOS](https://img.shields.io/badge/macOS-SwiftUI-black?style=flat-square&logo=apple&logoColor=white)](clients/mac/SynapsMac/)
+[![iOS](https://img.shields.io/badge/iOS-SwiftUI-black?style=flat-square&logo=apple&logoColor=white)](clients/ios/SynapsiOS/)
+[![Web](https://img.shields.io/badge/web-Next.js_14-black?style=flat-square&logo=next.js&logoColor=white)](frontend/)
 
-[Architecture](#-architecture) • [Features](#-key-features) • [Clients](#-ecosystem--clients) • [Quick Start](#-quick-start) • [Deployment](#-nas-deployment-cicd) • [Documentation](#-documentation)
-
----
+[How it works](#how-it-works) · [Features](#features) · [Getting started](#getting-started) · [Deployment](#deployment) · [Documentation](#documentation)
 
 </div>
 
-## Overview
-
-**Synaps** transforms any home server or headless NAS into a high-performance personal cloud. It pairs an asynchronous FastAPI backend and a Next.js Liquid Glass web dashboard with a native macOS Swift desktop companion.
-
-Whether backing up direct USB imports from an iPhone via ImageCaptureCore, cataloging multi-terabyte media vaults with background EXIF parsing, or synchronizing local directories with a Git-like state machine, Synaps keeps your data on your own hardware without third-party fees.
-
 ---
 
-## ⚡ Key Features
+## What it is
 
-### 📸 Apple Photos-Inspired Media Cloud
-- **Chronological Timeline**: Smooth virtualized infinite scrolling grouped intelligently by month and year.
-- **Old Photos Vault**: Automatically segregates media prior to a configurable cutoff date (`ARCHIVE_CUTOFF_YEAR`).
-- **Dense Gallery & Finder**: Switch between Apple Photos timeline view, dense gallery grid, and hierarchical NAS directory tree.
-- **Fullscreen Media Player**: In-browser hardware-accelerated video streaming with dynamic frame-accurate scrubbing, keyboard shortcuts, and detailed EXIF/codec inspection.
+Synaps turns an old PC into a personal cloud. The one it was built for is a 15-year-old Core 2 Duo with 2 GB of RAM running Ubuntu Server. It has four parts:
 
-### ⚡ Blazing High-Performance Thumbnail Engine
-- **Asynchronous Preheating**: Proactively crawls newest storage directories to pre-generate compact WebP thumbnails ahead of time.
-- **LIFO Priority Scheduling**: Generates on-screen viewport thumbnails first with thread pool workers.
-- **Sub-Millisecond Caching**: Multi-tier caching layer (in-memory LRU + persistent `.webp` files) for instant render times.
-- **HEVC / 4K 60fps Optimization**: Fast 0.1-second keyframe seeks and resilient timeout handling for high-bitrate video clips.
+| Part | What it does | Code |
+|---|---|---|
+| **NAS backend** | FastAPI + SQLite server. Stores every file once (named by its SHA-256), deduplicates across devices, generates thumbnails, and serves the API and the web app on port 8000. | [`backend/`](backend/) |
+| **Mac app** | A Finder-style app. Shows your Mac folders with a green tick on every file that is already on the NAS, syncs the rest, browses the NAS ("Home Cloud"), and imports from an iPhone over USB. | [`clients/mac/SynapsMac/`](clients/mac/SynapsMac/) |
+| **iPhone app** | An Apple Photos–style app. Backs up the photo library automatically on home Wi-Fi, even in the background, and shows progress on the Lock Screen. | [`clients/ios/SynapsiOS/`](clients/ios/SynapsiOS/) |
+| **Web dashboard** | Browser access to the NAS: timeline, folder browser, search, trash and settings. | [`frontend/`](frontend/) |
 
-### 🔄 Multi-Device Synchronization & Git-for-Files
-- **Two-Stage Content Deduplication**: Fast file-size hashing followed by SHA-256 chunk checks prevents duplicate media ingestion.
-- **Git-Style Status Badges**: Clear visual states for files across your devices:
-  - 🔴 **Uncommitted**: Local new or modified file pending sync to NAS.
-  - 🟢 **Committed**: Verified byte-for-byte identical to the NAS Vault.
-  - 🟡 **Syncing**: Transfer or background hash pre-check actively in flight.
-- **Directory Ingestion & Staging**: Automatic sorting into clean `YYYY/MM/` vault directories, handling 10+ GB batches effortlessly.
+## How it works
 
-### 🖥️ Native macOS Companion (`SynapsMac`)
-- **Built with Swift & SwiftUI**: Native macOS menu bar, sidebar navigation, keyboard shortcuts, and QuickLook previews (`Spacebar`).
-- **Hardware iPhone ImageCapture Integration**: Plug in your iPhone via USB, unlock, and immediately preview and import camera roll media directly into the NAS storage pipeline.
-- **Resilient Background Sync**: Non-blocking upload queues, retry loops, and native OS notifications on commit completion.
-
-### 📱 Native iOS Photos Companion (`SynapsiOS`)
-- **Authentic Apple Photos Experience**: Continuous timeline scroll with dynamic date range header, top gradient blur, and 5-column/3-column density.
-- **Visual Vault Badging**: 🟢 Green checkmark for committed NAS media, 🔴 Red cross for uncommitted camera roll items.
-- **Automated Wi-Fi Background Sync**: Automatically detects home Wi-Fi and triggers background upload tasks (`BGTaskScheduler`) without using cellular data.
-- **Manual Selection & Pre-Check**: Multi-select sync with zero-byte instant deduplication against NAS storage.
-- **Remote NAS Vault Browser**: Direct file and directory explorer on your iPhone.
-
----
-
-## 🏛 Architecture
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                          Clients & Frontends                           │
-├──────────────────────┬──────────────────────────┬──────────────────────┤
-│  Next.js 14 Web App  │   SynapsMac (SwiftUI)    │ SynapsiOS (SwiftUI)  │
-│  • Liquid Glass UI   │   • USB ImageCaptureCore │ • Apple Photos Grid  │
-│  • Timeline & Finder │   • QuickLook Preview    │ • Wi-Fi Auto-Sync    │
-│  • Media Streaming   │   • Git-for-Files Sync   │ • NAS Vault Browser  │
-└──────────┬───────────┴────────────┬─────────────┴──────────┬───────────┘
-           │                        │                        │
-      HTTP / REST              HTTP / REST              HTTP / REST
-           │                        │                        │
-┌──────────▼────────────────────────▼────────────────────────▼───────────┐
-│                   Synaps Asynchronous Backend Engine                   │
-│                                (FastAPI)                               │
-├────────────────────────────────────────────────────────────────────────┤
-│  • Startup Filesystem Scanner & Watcher                                │
-│  • LIFO WebP Thumbnail Generation Engine                               │
-│  • Background Thumbnail Preheating Pipeline                            │
-│  • Import Stager, Metadata Extractor & Dedup Check                     │
-│  • Soft-Delete Trash Manager with 30-Day Auto Purge                    │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-        ┌───────────────────────────┴───────────────────────────┐
-        ▼                                                       ▼
-┌──────────────┐                                       ┌───────────────────┐
-│ SQLite Store │                                       │   NAS Filesystem  │
-│ (synaps.db)  │                                       │  (/storage/Vault) │
-└──────────────┘                                       └───────────────────┘
+```mermaid
+flowchart LR
+    subgraph Devices
+        MAC["Mac app"]
+        IOS["iPhone app"]
+        WEB["Web browser"]
+    end
+    subgraph NAS["NAS (homecloud1, port 8000)"]
+        API["FastAPI backend"]
+        DB[("SQLite<br/>synaps.db")]
+        VAULT["/storage<br/>Vault/YYYY/MM/sha_name<br/>Mirrors/owner/device/..."]
+        THUMBS["Thumbnail cache"]
+    end
+    MAC -- "check hashes, upload" --> API
+    IOS -- "check hashes, upload in background" --> API
+    WEB -- "browse, view" --> API
+    API --> DB
+    API --> VAULT
+    API --> THUMBS
 ```
 
----
+1. **Hash first, upload second.** An app computes each file's SHA-256 and asks the NAS which ones it already has (`/api/v2/ingest/check`). Anything the NAS already holds, from any device, is linked instantly with zero bytes sent.
+2. **Stream the rest.** New files are streamed to the NAS (`PUT /api/v2/ingest/stream`), verified against the hash, and stored once in the vault. A hardlink mirror under `Mirrors/` recreates each device's folder structure without using extra space.
+3. **Show the state.** Each app keeps a local database of what is committed, so the green ticks appear instantly. Photos that reached the NAS another way, such as through the Mac, are matched by name and size (`/api/v2/ingest/match`).
 
-## 💻 Ecosystem & Clients
+The full picture is in the [overview](docs/01-overview.md) and the [storage and ingest](docs/03-storage-and-ingest.md) guide.
 
-| Component | Stack | Description | Location |
-| :--- | :--- | :--- | :--- |
-| **Backend API** | Python 3.11+, FastAPI, SQLAlchemy | High-concurrency async file ingestion, indexing, and thumbnail engine. | [`backend/`](backend/) |
-| **Web Dashboard** | Next.js 14 (App Router), TypeScript, Tailwind CSS | Frosted glass interface with light/dark modes, timeline, search, and settings. | [`frontend/`](frontend/) |
-| **macOS Client** | Swift 5.9+, SwiftUI, ImageCaptureCore | Native Finder-like client with direct iPhone USB import and synchronization. | [`clients/mac/SynapsMac/`](clients/mac/SynapsMac/) |
-| **iOS Client** | Swift 5.9+, SwiftUI, PhotoKit | Native Apple Photos companion with Wi-Fi auto-sync and vault status badging. | [`clients/ios/SynapsiOS/`](clients/ios/SynapsiOS/) |
-| **Storage Engine** | SQLite, Pillow, FFmpeg | Robust database modeling and media processing pipelines. | [`backend/models.py`](backend/models.py) |
+## Features
 
----
+**iPhone app**
+- Timeline of the whole photo library with a green tick (on the NAS) or red cross (not yet) on every item
+- Automatic backup on home Wi-Fi only, with an optional charging-only mode; uploads continue while the app is in the background
+- Live Photos, videos and edited versions backed up as separate files
+- Lock Screen progress while backing up:
 
-## 🚀 Quick Start
+  <img src="docs/images/ios-lock-screen-progress.png" alt="Lock Screen backup progress" width="420">
 
-### Prerequisites
-- **Python**: 3.11 or higher
-- **Node.js**: 18.x or higher (`npm` included)
-- **FFmpeg & ffprobe**: Required for video thumbnail extraction and metadata analysis
-  - macOS: `brew install ffmpeg`
-  - Linux (Debian/Ubuntu): `sudo apt install ffmpeg`
+- Browse the NAS vault from the phone
 
-### 1. Development (your Mac)
+**Mac app**
+- Finder-like icon and list views, selection, sorting, kind grouping and Quick Look
+- Green ticks for files already on the NAS, and one-click sync for the rest
+- "Home Cloud": browse the NAS with thumbnails
+- Import photos from an iPhone connected over USB
+
+**NAS backend**
+- Content-addressed storage: one copy of each file however many devices upload it
+- Fast thumbnails (WebP) for photos, HEIC and video, generated in a bounded background queue
+- Downloads with HTTP Range support (video seeking) and caching
+- Optional API token; uploads confined to the storage folder; SQLite in WAL mode
+
+**Web dashboard**
+- Timeline, folder browser, search, trash and settings; served by the backend as static files, so the NAS doesn't run Node.js
+
+## Repository layout
+
+```
+synaps                  one command for install, dev, test, update, deploy (run ./synaps help)
+backend/                FastAPI server: main.py, routers/, scanner, thumbnails, storage engine
+  ├─ migrations/        one-off database migrations
+  ├─ scripts/           maintenance scripts (thumbnail preheat, cleanup, audits)
+  └─ tests/             pytest suite
+frontend/               Next.js web dashboard (exported as static files in production)
+clients/mac/SynapsMac/  macOS app (SwiftUI, Swift Package)
+clients/ios/SynapsiOS/  iPhone app (SwiftUI, Xcode project + Live Activity widget)
+deploy/                 systemd units, sudoers rule, Bonjour advertisement used by ./synaps install
+docs/                   guides; start at docs/README.md
+.github/workflows/      CI
+```
+
+## Getting started
+
+**Requirements:** Python 3.10+, Node 18+, ffmpeg. On a Mac: Xcode or the Command Line Tools.
+
+### Run it locally
 
 ```bash
 git clone https://github.com/harshoutoftokens/synaps.git
 cd synaps
-./synaps dev      # backend on :8000 + web app on :3000, Ctrl+C stops both
-./synaps test     # backend tests, web lint/build, Mac client tests
+./synaps dev        # backend on :8000 + web app on :3000 (Ctrl+C stops both)
+./synaps test       # backend tests, web lint + build, Mac app tests
 ```
 
-Backend settings (storage path, API token, owner name, …) live in `backend/.env`; copy
-[`backend/.env.example`](backend/.env.example) and uncomment what you need. Without it the backend
-serves the bundled `mock_storage/`.
+Without a `backend/.env`, the backend serves the sample library in `mock_storage/`. Settings such as the storage path, API token and owner name are listed in [`backend/.env.example`](backend/.env.example).
 
-### 2. Native clients
+### Build the apps
 
 ```bash
-./synaps mac      # build SynapsMac.app and open it
-./synaps ios      # open the iPhone app in Xcode (pick your iPhone, set your Team, Run)
+./synaps mac        # builds SynapsMac.app and opens it
+./synaps ios        # opens the iPhone project in Xcode: pick your iPhone, set your Team, Run
 ```
 
----
+> **Mac app look:** build the Mac app with your Mac's default toolchain (Command Line Tools). Xcode 27's default Swift build system marks the app as built with the macOS 14 SDK, and macOS 26 then shows it without the Liquid Glass design. Check a build with `vtool -show-build clients/mac/SynapsMac/SynapsMac.app/Contents/MacOS/SynapsMac`; it should report `sdk 26.x` or newer. Details in the [Mac app guide](docs/08-mac-app.md).
 
-## 🛠 NAS Deployment (CI/CD)
+## Deployment
 
-One-time setup on the NAS (Ubuntu Server, over SSH):
+On the NAS (Ubuntu), one command sets everything up: packages, the Python environment, the web app, systemd services, mDNS so the NAS answers as `<hostname>.local`, and a timer that keeps the NAS up to date.
 
 ```bash
 git clone https://github.com/harshoutoftokens/synaps.git ~/nas_dashboard
 cd ~/nas_dashboard
 ./synaps install --storage /storage
+./synaps doctor     # every check should say ok
 ```
 
-`install` sets up packages (ffmpeg, avahi, Python venv), builds the web app, and installs systemd units:
-`synaps-backend` (API + web app on port 8000, waits for the storage disk) and `synaps-update.timer`.
-It also advertises the NAS over Bonjour (`<hostname>.local`, `_synaps._tcp`) so the Mac and iPhone apps find it.
+After that, deploying is merging to `main`:
 
-After that, deploying is just merging to `main`:
+1. Every push and pull request runs [CI](.github/workflows/ci.yml): backend tests, web build, Mac tests and the iPhone build.
+2. Every 5 minutes the NAS checks `main`. It deploys a new commit only after CI has passed, rebuilds only what changed, backs up the database, restarts, and health-checks.
+3. If anything fails, the NAS rolls back automatically and skips that commit until a newer one lands.
 
-1. Every push and PR runs [CI](.github/workflows/ci.yml): backend tests, web build, Mac tests, iOS build.
-2. Every 5 minutes the NAS checks `origin/main`. When a new commit has passed CI it pulls it,
-   rebuilds only what changed, backs up the database, restarts, and health-checks.
-3. If anything fails, it rolls back to the previous version and skips that commit until a newer one lands.
+`./synaps status`, `./synaps logs` and `./synaps rollback` cover day-to-day operation. See [deployment](docs/11-deployment.md) and [operations](docs/12-operations.md).
 
-```bash
-./synaps deploy           # from your Mac: tell the NAS to update now (set SYNAPS_NAS=user@host)
-./synaps status | logs | doctor | rollback [rev]     # on the NAS
-```
+## Documentation
 
-See [docs/11 — Deployment & Services](docs/11_deployment_and_services.md) for details.
+Start with the [documentation index](docs/README.md). The guides:
 
----
+| Guide | Covers |
+|---|---|
+| [Overview](docs/01-overview.md) | How the pieces fit together, glossary |
+| [Backend](docs/02-backend.md) | Server structure, settings, auth, background jobs |
+| [Storage and ingest](docs/03-storage-and-ingest.md) | Vault layout, dedup, the upload pipeline |
+| [Database](docs/04-database.md) | Tables, indexes, migrations, backups |
+| [Scanner and timeline](docs/05-scanner-and-timeline.md) | How the web timeline is built |
+| [Thumbnails and media](docs/06-thumbnails-and-media.md) | Thumbnails, previews, downloads |
+| [Web dashboard](docs/07-web-dashboard.md) | The Next.js app |
+| [Mac app](docs/08-mac-app.md) | SynapsMac internals |
+| [iPhone app](docs/09-iphone-app.md) | SynapsiOS internals, background sync, Lock Screen progress |
+| [API reference](docs/10-api-reference.md) | Every endpoint |
+| [Deployment](docs/11-deployment.md) | `./synaps`, systemd, CI/CD |
+| [Operations](docs/12-operations.md) | Health checks, backups, maintenance scripts, troubleshooting |
+| [Code walkthroughs](docs/13-code-walkthroughs.md) | End-to-end traces through the code |
 
-## 📚 Documentation
+Project notes: [changelog](CHANGELOG.md) · [roadmap and known issues](docs/project/roadmap.md) · [history](docs/project/history.md) · [versioning](docs/project/versioning.md)
 
-Deep-dive architectural guides and developer manuals are available in the [`docs/`](docs/) directory:
+## License
 
-- [**01 — Project Overview**](docs/01_project_overview.md): System architecture and data flow principles.
-- [**02 — Backend Architecture**](docs/02_backend_architecture.md): FastAPI structure and router design.
-- [**03 — Frontend Architecture**](docs/03_frontend_architecture.md): Next.js components and Liquid Glass tokens.
-- [**04 — Database & Indexing**](docs/04_database_and_indexing.md): SQLite schema and models.
-- [**05 — Media Scanner**](docs/05_media_scanner.md): Filesystem scanner and EXIF parser.
-- [**06 — Thumbnail Pipeline**](docs/06_thumbnail_pipeline.md): Preheating engine and LIFO worker queue.
-- [**07 — API Reference**](docs/07_api_reference.md): Complete REST endpoint specifications.
-- [**10 — Sync Engine**](docs/10_sync_engine.md): Two-stage SHA deduplication and client state machine.
-- [**11 — Deployment & Services**](docs/11_deployment_and_services.md): Production systemd, reverse proxies, and updates.
-
----
-
-## 🗺 Roadmap & Milestones
-
-- [x] **v0.1 – First Working Build**: Fast directory walking and web preview.
-- [x] **v0.2 – Scanner & NAS Hardening**: Error boundaries and format resilience.
-- [x] **v0.3 – Import Manager**: Staging pipeline and duplicate detection.
-- [x] **v0.4 – Media Browser**: Source filters and Old Photos grouping.
-- [x] **v1.0 – Stable NAS Release**: Media timeline, video streaming, and trash bin.
-- [x] **v2.0 – Liquid Glass & Native Clients**: Complete Apple Photos UI rewrite, native Swift macOS client, and background thumbnail preheating.
-- [ ] **v2.1 – Albums & Memory Collections**: Tagging, smart albums, and timeline story highlights.
-- [ ] **v2.2 – Local AI**: On-device face clustering, semantic CLIP search, and object detection.
-
-See [CHANGELOG.md](CHANGELOG.md) for full release notes and [ROADMAP.md](ROADMAP.md) for future specifications.
-
----
-
-## 📄 License
-
-This project is licensed under personal and open-source terms. See [LICENSE](LICENSE) for details.
+No license file has been added yet, so all rights are reserved by default. To let others use the code, add a `LICENSE` file (for example MIT).

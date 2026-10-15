@@ -8,10 +8,10 @@ and the web UI keep the other core of the Core 2 Duo. Only the thumbnail cache (
 media_files has_thumbnail flags) are written; media files are never modified.
 
 Usage:
-  python3 preheat_thumbnails.py                     # Pre-heat all of /storage/Vault (newest first)
-  python3 preheat_thumbnails.py --path Vault/2026/09 # Pre-heat a specific folder
-  python3 preheat_thumbnails.py --limit 500         # Pre-heat first 500 missing items
-  python3 preheat_thumbnails.py --workers 2         # Use both cores (only when the NAS is idle)
+  python3 scripts/preheat_thumbnails.py                     # Pre-heat all of /storage/Vault (newest first)
+  python3 scripts/preheat_thumbnails.py --path Vault/2026/09 # Pre-heat a specific folder
+  python3 scripts/preheat_thumbnails.py --limit 500         # Pre-heat first 500 missing items
+  python3 scripts/preheat_thumbnails.py --workers 2         # Use both cores (only when the NAS is idle)
 """
 import os
 import sys
@@ -21,8 +21,9 @@ import gc
 import logging
 
 # Ensure backend root is on sys.path
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SCRIPT_DIR)
+# Make the backend modules (config, thumbnails, ...) importable however this script is started
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BACKEND_DIR)
 
 from config import STORAGE_PATH, THUMBNAIL_DIR, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from thumbnails import (

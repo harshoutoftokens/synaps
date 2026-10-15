@@ -454,7 +454,7 @@ def _process(source_path: str, thumb_path: str) -> bool:
     except OSError:
         return False  # source vanished (trashed/moved) since it was queued
     if find_fresh_thumbnail(thumb_path, source_stat) is not None:
-        return False  # generated meanwhile (e.g. by preheat_thumbnails.py)
+        return False  # generated meanwhile (e.g. by scripts/preheat_thumbnails.py)
     ensure_thumbnail_dir()
     if generate_thumbnail_file(source_path, thumb_path):
         _clear_failure(source_path)

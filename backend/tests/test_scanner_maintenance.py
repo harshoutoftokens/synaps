@@ -13,7 +13,7 @@ import pytest
 from conftest import make_jpeg_bytes
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS_DIR = os.path.join(os.path.dirname(BACKEND_DIR), "scripts")
+SCRIPTS_DIR = os.path.join(BACKEND_DIR, "scripts")
 
 
 @pytest.fixture

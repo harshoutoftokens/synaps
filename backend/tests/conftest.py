@@ -29,6 +29,10 @@ for _sub in ("storage", "thumbnails", "trash"):
 
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
+# maintenance scripts (backend/scripts/) are imported by name in the tests
+SCRIPTS_DIR = os.path.join(BACKEND_DIR, "scripts")
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
 
 
 def pytest_sessionfinish(session, exitstatus):

@@ -32,7 +32,7 @@ import argparse
 DEFAULT_STORAGE_ROOT = os.getenv("SYNAPS_STORAGE_PATH", "/storage")
 DEFAULT_DB_PATH = os.getenv(
     "SYNAPS_DB_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", "synaps.db"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "synaps.db"),
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
