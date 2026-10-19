@@ -12,6 +12,8 @@ public struct MainView: View {
     public var body: some View {
         NavigationSplitView {
             SidebarView(viewModel: viewModel)
+                // Cap the sidebar so dragging it can't squeeze the content area until it breaks
+                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
         } detail: {
             VStack(spacing: 0) {
                 // Main Content View
@@ -52,6 +54,7 @@ public struct MainView: View {
                 // Bottom Sync Status & Action Bar
                 SyncStatusBar(viewModel: viewModel, isGridMode: displayMode == .grid || viewModel.selectedSidebarItem?.isPhone == true)
             }
+            .frame(minWidth: 580)
             .navigationTitle(viewModel.selectedSidebarItem?.title ?? "Synaps")
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
