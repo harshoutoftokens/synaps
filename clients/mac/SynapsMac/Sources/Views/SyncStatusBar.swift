@@ -153,6 +153,7 @@ public struct SyncStatusBar: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(.red)
+                    .fixedSize()
                     .help("Stop syncing. Files already committed stay on the NAS")
                 }
             }
