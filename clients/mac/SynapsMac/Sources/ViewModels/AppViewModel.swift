@@ -167,6 +167,7 @@ public final class AppViewModel: ObservableObject {
     public let phoneManager = iPhoneManager.shared
     
     private var cancellables = Set<AnyCancellable>()
+    private var syncTask: Task<Void, Never>?
     
     private var nasRecoveryTimer: Timer?
     
@@ -868,7 +869,14 @@ public final class AppViewModel: ObservableObject {
         
         startSyncProcess(for: toSync, title: "Syncing \(toSync.count) selected items")
     }
-    
+
+    /// Stops the running sync. The file being uploaded is aborted; files already committed stay committed.
+    public func cancelSync() {
+        guard isSyncing, let task = syncTask, !task.isCancelled else { return }
+        task.cancel()
+        syncStatusMessage = "Cancelling sync..."
+    }
+
     private func startSyncProcess(for toSync: [SynapsFileItem], title: String) {
         guard !isSyncing else { return }
         guard nasOnline else {
@@ -887,19 +895,21 @@ public final class AppViewModel: ObservableObject {
         )
         loadRecentActivities()
         
-        Task {
+        syncTask = Task {
             let total = toSync.count
             var uploadedCount = 0
             let startTime = Date()
             var totalBytesUploaded: Int64 = 0
-            
+
             // Step 1: Pre-compute hashes and run batch pre-check deduplication if possible
             var itemsPendingUpload: [SynapsFileItem] = []
             var itemsWithSha: [SynapsFileItem] = []
-            
+
             for var item in toSync {
+                if Task.isCancelled { break }
                 if item.sha256 == nil || item.sha256?.isEmpty == true {
-                    if let sha = HashEngine.computeSHA256(for: item.originalPath) {
+                    // Hash off the main thread so the UI (and the Cancel button) stays responsive
+                    if let sha = await HashEngine.computeSHA256Async(for: item.originalPath) {
                         item.sha256 = sha
                     }
                 }
@@ -910,7 +920,7 @@ public final class AppViewModel: ObservableObject {
                 }
             }
             
-            if !itemsWithSha.isEmpty {
+            if !itemsWithSha.isEmpty && !Task.isCancelled {
                 do {
                     let precheckResp = try await nasClient.batchPreCheck(
                         sourceId: itemsWithSha.first?.sourceId ?? "mac_harsh",
@@ -963,6 +973,7 @@ public final class AppViewModel: ObservableObject {
             let dedupCount = uploadedCount
             // Step 2: Upload remaining files
             for (index, item) in itemsPendingUpload.enumerated() {
+                if Task.isCancelled { break }
                 let currentItemNumber = min(dedupCount + index + 1, total)
                 self.syncStatusMessage = "[\(currentItemNumber)/\(total)] Syncing \(item.filename)..."
                 
@@ -1010,6 +1021,12 @@ public final class AppViewModel: ObservableObject {
                             fileItems[idx].syncStatus = .failed
                         }
                     }
+                } catch where Task.isCancelled {
+                    // Upload aborted by Cancel: the file isn't on the NAS, but it didn't fail either
+                    if let idx = fileItems.firstIndex(where: { $0.id == item.id }) {
+                        fileItems[idx].syncStatus = .uncommitted
+                    }
+                    break
                 } catch {
                     cacheStore.logActivity(
                         eventType: .syncFailed,
@@ -1027,18 +1044,34 @@ public final class AppViewModel: ObservableObject {
             }
             
             let elapsed = Date().timeIntervalSince(startTime)
+            let wasCancelled = Task.isCancelled
             await MainActor.run {
                 for i in 0..<self.fileItems.count {
                     if self.fileItems[i].isDirectory {
                         self.fileItems[i].syncStatus = LocalFileScanner.shared.evaluateFolderSyncStatus(folderPath: self.fileItems[i].originalPath)
+                    } else if wasCancelled && self.fileItems[i].syncStatus == .syncing {
+                        self.fileItems[i].syncStatus = .uncommitted
                     }
                 }
                 self.isSyncing = false
-                self.syncProgress = 1.0
+                self.syncTask = nil
+                self.syncProgress = wasCancelled ? 0.0 : 1.0
                 self.syncSpeedMBs = 0.0
-                self.syncStatusMessage = "Committed \(uploadedCount) files in \(String(format: "%.1f", elapsed))s"
+                self.syncStatusMessage = wasCancelled
+                    ? "Sync cancelled: committed \(uploadedCount) of \(total) files"
+                    : "Committed \(uploadedCount) files in \(String(format: "%.1f", elapsed))s"
             }
-            
+
+            if wasCancelled {
+                cacheStore.logActivity(
+                    eventType: .syncCancelled,
+                    details: "Cancelled after committing \(uploadedCount) of \(total) files",
+                    sourceId: toSync.first?.sourceId
+                )
+                loadRecentActivities()
+                return
+            }
+
             cacheStore.logActivity(
                 eventType: .syncCompleted,
                 details: "Committed \(uploadedCount) files in \(String(format: "%.1f", elapsed))s",
