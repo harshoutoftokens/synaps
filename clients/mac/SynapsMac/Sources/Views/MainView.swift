@@ -52,6 +52,7 @@ public struct MainView: View {
                 // Bottom Sync Status & Action Bar
                 SyncStatusBar(viewModel: viewModel, isGridMode: displayMode == .grid || viewModel.selectedSidebarItem?.isPhone == true)
             }
+            .softTopScrollEdge()
             .navigationTitle(viewModel.selectedSidebarItem?.title ?? "Synaps")
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
@@ -176,6 +177,19 @@ public struct MainView: View {
         case .dateModified, .dateCreated: return "Newest First"
         case .size: return "Largest First"
         case .kind: return "Folders Last (Z to A)"
+        }
+    }
+}
+
+private extension View {
+    /// Fades content into the toolbar as it scrolls under it, instead of macOS 26's default hard
+    /// edge (a solid band with a dividing line). Earlier macOS versions keep their standard look.
+    @ViewBuilder
+    func softTopScrollEdge() -> some View {
+        if #available(macOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
         }
     }
 }
