@@ -107,6 +107,12 @@ FRONTEND_DIST = os.getenv("SYNAPS_FRONTEND_DIST", "").strip()
 # Uploads: refuse a streamed upload that would leave less than this much free space
 MIN_FREE_BYTES = int(os.getenv("SYNAPS_MIN_FREE_BYTES", str(512 * 1024 * 1024)))
 
+# System metrics for the stats dashboard (system_metrics.py): CPU, memory, temperature,
+# network and disk are sampled every METRICS_INTERVAL_SECONDS (0 = sampler off), kept per
+# minute for a day and as hourly averages for METRICS_HOURLY_RETENTION_DAYS.
+METRICS_INTERVAL_SECONDS = int(os.getenv("SYNAPS_METRICS_INTERVAL", "60"))
+METRICS_HOURLY_RETENTION_DAYS = int(os.getenv("SYNAPS_METRICS_RETENTION_DAYS", "30"))
+
 # Sync target
 SYNC_TARGET_DIR = os.getenv(
     "SYNAPS_SYNC_TARGET_DIR", os.path.join(STORAGE_PATH, "Vault", OWNER_NAME, "Iphone")
