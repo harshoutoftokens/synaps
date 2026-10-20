@@ -48,18 +48,46 @@ Near-term work, in the order it should happen:
 
 Not scheduled; kept here so they aren't lost.
 
+Synaps is used by one family, so ideas are ranked with that in mind: keeping the photos safe comes first, then making the apps easy for family members, then the nice-to-haves. Features for scale or public sharing matter much less.
+
+**Data safety** (the NAS is a single disk in a 15-year-old PC holding the only copy)
+- Off-site backup of the vault for disaster recovery: a nightly encrypted copy (restic or rclone) to a USB drive, Backblaze B2 / S3, or a relative's house. Show "last backup: 6h ago" in the apps and on the dashboard. *The biggest gap today.*
+- Disk health monitoring: read SMART data (`smartctl`) and flag a failing drive or a disk over 85% full. Shown on the stats dashboard (below).
+- Scheduled integrity checks: re-hash a slice of the vault every night so the whole vault is verified every few weeks (builds on the hash audit tool under *Planned*).
+
+**Family use**
+- Multiple users with separate libraries: one login per family member, a parent account that sees everything. The Mac app's hard-coded identity (`Mirrors/Harsh/Mac`, `mac_harsh`) has to go first. Shared albums, setup without IP addresses and per-person stats all depend on this.
+- Shared family albums ("Goa trip 2026") that anyone can add to and everyone sees (the v2 schema already has `albums` / `album_items`), plus smart collections
+- Zero-config setup: the apps discover the NAS through the `_synaps._tcp` Bonjour service it already advertises, so family members never type an address
+- "Free up space" on the iPhone: delete photos that are confirmed on the NAS, after a confirmation step
+- Save back to the phone: download a photo or video from the NAS into the iPhone's Photos library
+- Expiring private share links for sending an album to relatives who don't use the NAS
+- Android client (only if someone in the family uses Android)
+
+**Away from home**
+- Remote access through Tailscale: browse and back up from anywhere without exposing the NAS to the internet
+- Backup over mobile data on trips, with a size limit or a "photos only, no videos" option
+
 **Photos**
-- Albums and smart collections in the apps and the web app (the v2 schema already has `albums` / `album_items`)
-- Map view from GPS metadata; "On this day" memories
-- Visual duplicate detection (perceptual hashes), not just identical bytes
+- "On this day" memories as a home-screen widget or a daily notification
+- Map view from GPS metadata
+- Visual duplicate and burst detection (perceptual hashes), not just identical bytes, with a suggestion of which shot to keep
 
 **Search and intelligence** (local only, must fit 2 GB of RAM or run on the Mac)
-- Semantic search ("sunset at the beach") with local embeddings
-- Face grouping; OCR for screenshots and documents
+- Semantic search ("sunset at the beach", "birthday cake") with local embeddings
+- Face grouping ("show me Mom"); OCR for screenshots and documents
 
-**System**
+**Monitoring and convenience**
+- Stats dashboard as the web app's home page: CPU, RAM, temperature, disk, network, backup history per device, and problems that need attention. Being planned now (October 2026); see [stats dashboard plan](stats-dashboard-plan.md).
+- Stale-backup warnings: "Mom's iPhone hasn't backed up in 7 days" (on the dashboard first; notifications later)
+- Storage breakdown: space used per person and per type (photos, videos, files), and how much deduplication saves
+- Scheduled Mac backups (nightly, or when a watched folder changes) instead of clicking Sync
 - Scan progress reporting and scheduled incremental scans
 - Real-time updates to the web app (WebSocket) when uploads land
-- Off-site backup of the vault (Backblaze B2 / S3) for disaster recovery
-- Android client
-- Multiple users with separate libraries
+
+**Mac app** (noticed while adding Cancel sync, October 2026)
+- Resume a cancelled or interrupted sync from where it stopped instead of re-checking every file
+- Cancel for iPhone USB imports, matching Cancel for NAS syncs
+- Folder sync still scans the folder on the main thread (`syncItem` / `syncSelectedItems` call `scanDirectoryRecursively` synchronously), which freezes the window on large folders
+- The bottom bar gets crowded during a sync (progress, speed, Cancel, zoom, two "Syncing..." buttons); hide the Sync buttons while syncing
+- Per-file upload progress and a time-remaining estimate for large files
