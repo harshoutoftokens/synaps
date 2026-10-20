@@ -1,440 +1,432 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Activity, AlertTriangle, CheckCircle2, Clock, Cpu, HardDrive, Laptop, MemoryStick, Monitor,
+  Network, Smartphone, Thermometer, Upload, Database, XCircle,
+} from 'lucide-react';
 import { TopBar } from '@/components/TopBar';
-import { MediaGrid, type MediaItem } from '@/components/MediaGrid';
-import { useAppStore } from '@/lib/store';
-import { getMedia, getMediaStats } from '@/lib/api';
-import { AlertCircle, ChevronRight, Star } from 'lucide-react';
+import { GlassSegmentedControl } from '@/components/glass/GlassSegmentedControl';
+import { DayBars, Figure, Ring, Sparkline, StorageBar, Tile, type TileState } from '@/components/dashboard/Widgets';
+import {
+  STALE_DEVICE_DAYS, bytesParts, daysSince, formatBytes, formatClock, formatCount, formatDuration,
+  formatRate, formatWhen, getActivity, getBackupHistory, getDevices, getStorage, getSystemHistory,
+  getSystemNow, parseUtc, usePolling, type ActivityItem, type Device, type HistoryRange, type MetricPoint,
+  type SystemHistory, type SystemNow,
+} from '@/lib/system';
 
-interface TimelineGroup {
-  year: number;
-  month: number;
-  month_name: string;
-  items: MediaItem[];
+const RANGES: { key: HistoryRange; label: string; seconds: number }[] = [
+  { key: '24h', label: '24 hours', seconds: 86400 },
+  { key: '7d', label: '7 days', seconds: 7 * 86400 },
+  { key: '30d', label: '30 days', seconds: 30 * 86400 },
+];
+
+interface Problem {
+  level: 'warn' | 'crit';
+  text: string;
 }
 
-const groupKey = (g: { year: number; month: number }) => `${g.year}-${g.month}`;
-
-// Merge the next page into the month groups. Only groups that receive items get new objects,
-// so the (memoized) grids of every other month don't re-render.
-function mergeGroups(prev: TimelineGroup[], incoming: TimelineGroup[]): TimelineGroup[] {
-  const merged = prev.slice();
-  const indexByKey = new Map(merged.map((g, i) => [groupKey(g), i]));
-  for (const group of incoming) {
-    const i = indexByKey.get(groupKey(group));
-    if (i === undefined) {
-      if (group.items.length > 0) {
-        indexByKey.set(groupKey(group), merged.length);
-        merged.push(group);
-      }
-      continue;
-    }
-    const existingIds = new Set(merged[i].items.map((item) => item.id));
-    const newItems = group.items.filter((item) => !existingIds.has(item.id));
-    if (newItems.length > 0) merged[i] = { ...merged[i], items: merged[i].items.concat(newItems) };
+/** What needs the owner's attention, most serious first. */
+function findProblems(now: SystemNow | null, nowError: Error | null, devices: Device[] | null, lastGood: number | null): Problem[] {
+  const problems: Problem[] = [];
+  if (nowError) {
+    problems.push({
+      level: 'crit',
+      text: lastGood
+        ? `Can't reach the NAS. Showing what it reported at ${formatClock(lastGood)}.`
+        : "Can't reach the NAS. Check that it's on and connected.",
+    });
   }
-  merged.sort((a, b) => {
-    if (a.year !== b.year) return b.year - a.year;
-    return b.month - a.month;
-  });
-  return merged;
+  const percent = now?.disk.percent;
+  if (percent != null && percent >= 95) {
+    problems.push({ level: 'crit', text: `Disk is ${Math.round(percent)}% full: ${formatBytes(now!.disk.free)} left.` });
+  } else if (percent != null && percent >= 85) {
+    problems.push({ level: 'warn', text: `Disk is ${Math.round(percent)}% full: ${formatBytes(now!.disk.free)} left.` });
+  }
+  for (const device of devices ?? []) {
+    const days = daysSince(parseUtc(device.last_backup_at));
+    if (days != null && days >= STALE_DEVICE_DAYS) {
+      problems.push({ level: 'warn', text: `${device.name} hasn't backed up in ${days} days.` });
+    }
+  }
+  return problems.sort((a, b) => (a.level === b.level ? 0 : a.level === 'crit' ? -1 : 1));
 }
 
-export default function MediaBrowser() {
-  // Data State
-  const [timelineGroups, setTimelineGroups] = useState<TimelineGroup[]>([]);
-  const [galleryItems, setGalleryItems] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<any>(null);
+/**
+ * Months until the disk is full, from the growth over the hourly history (least squares).
+ * Null until there are at least three days of samples; Infinity when the disk isn't growing.
+ */
+function monthsUntilFull(history: SystemHistory | null, free: number | null): number | null {
+  const points = (history?.points ?? []).filter((p) => p.disk_used != null);
+  if (free == null || points.length < 2 || points[points.length - 1].t - points[0].t < 3 * 86400) return null;
+  const n = points.length;
+  const meanT = points.reduce((s, p) => s + p.t, 0) / n;
+  const meanV = points.reduce((s, p) => s + (p.disk_used as number), 0) / n;
+  let num = 0;
+  let den = 0;
+  for (const p of points) {
+    num += (p.t - meanT) * ((p.disk_used as number) - meanV);
+    den += (p.t - meanT) ** 2;
+  }
+  const bytesPerSecond = den ? num / den : 0;
+  if (bytesPerSecond <= 0) return Infinity;
+  return free / bytesPerSecond / (30 * 86400);
+}
 
-  // Timeline Hierarchy State
-  const [collapsedYears, setCollapsedYears] = useState<Set<number>>(new Set());
-  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
-  const [hasInitializedState, setHasInitializedState] = useState(false);
+function series(history: SystemHistory | null, pick: (p: MetricPoint) => number | null) {
+  return (history?.points ?? []).map((p) => ({ t: p.t, v: pick(p) }));
+}
 
-  // Gallery Sticky Date State
-  const [activeDateHeader, setActiveDateHeader] = useState<string | null>(null);
+function DeviceIcon({ platform }: { platform: string }) {
+  const p = platform.toLowerCase();
+  const Icon = p.includes('ios') || p.includes('iphone') ? Smartphone : p.includes('mac') ? Laptop : Monitor;
+  return <Icon size={16} className="text-[var(--w-text-2)] shrink-0" aria-hidden />;
+}
 
-  const activeFilter = useAppStore((s) => s.activeFilter);
-  const activeView = useAppStore((s) => s.activeView);
-  const activeSources = useAppStore((s) => s.activeSources);
-  const observerRef = useRef<HTMLDivElement>(null);
+export default function Dashboard() {
+  const [range, setRange] = useState<HistoryRange>('24h');
+  const rangeSeconds = RANGES.find((r) => r.key === range)!.seconds;
+  const rangeLabel = RANGES.find((r) => r.key === range)!.label;
 
-  // Pagination bookkeeping lives in refs so the observer callback and late responses see
-  // current values. Every reset bumps the generation; responses from older ones are dropped
-  // (otherwise a slow page from the previous filter gets appended to the new results).
-  const generationRef = useRef(0);
-  const pageRef = useRef(0);
-  const inFlightRef = useRef(false);
-  const hasMoreRef = useRef(true);
-  const groupsRef = useRef<TimelineGroup[]>([]);
-  groupsRef.current = timelineGroups;
-  const pageAddedGroupsRef = useRef(false);
-  const autoLoadsRef = useRef(0);
+  const now = usePolling(getSystemNow, 10_000);
+  const history = usePolling(() => getSystemHistory(range), 60_000, [range]);
+  const month = usePolling(() => getSystemHistory('30d'), 10 * 60_000);
+  const backups = usePolling(() => getBackupHistory(30), 5 * 60_000);
+  const devices = usePolling(getDevices, 60_000);
+  const storage = usePolling(getStorage, 5 * 60_000);
 
-  const fetchPage = useCallback(async (reset: boolean) => {
-    if (!reset && (inFlightRef.current || !hasMoreRef.current)) return;
-    const generation = reset ? ++generationRef.current : generationRef.current;
-    const pageNum = reset ? 1 : pageRef.current + 1;
-    inFlightRef.current = true;
-    if (reset) {
-      setLoading(true);
-    } else {
-      setLoadingMore(true);
-    }
-    setError(null);
+  const n = now.data;
+  const problems = findProblems(n, now.error, devices.data?.devices ?? null, now.updatedAt);
+  const attention: TileState = problems.some((p) => p.level === 'crit') ? 'crit' : problems.length ? 'warn' : 'ok';
+  const diskPercent = n?.disk.percent ?? null;
+  const diskState: TileState = diskPercent == null ? 'ok' : diskPercent >= 95 ? 'crit' : diskPercent >= 85 ? 'warn' : 'ok';
+  const fullIn = monthsUntilFull(month.data, n?.disk.free ?? null);
 
-    try {
-      const params: any = {
-        page: pageNum,
-        // Timeline pages mostly land in collapsed months: bigger pages = fewer round trips
-        per_page: activeView === 'gallery' ? 100 : 200,
-        view: activeView
-      };
+  // One time window for every sparkline in the chosen range
+  const to = n?.sampled_at ?? Math.floor(Date.now() / 1000);
+  const from = to - rangeSeconds;
+  const collectingSince = history.data?.collecting_since ?? null;
+  const tempPeak = useMemo(() => {
+    const temps = (history.data?.points ?? []).map((p) => p.temp_max ?? p.temp_c).filter((v): v is number => v != null);
+    return temps.length ? Math.max(...temps) : null;
+  }, [history.data]);
 
-      if (activeFilter) params.media_type = activeFilter;
-      if (activeSources.size > 0) {
-        params.sources = Array.from(activeSources).join(',');
-      }
+  // What a tile says when there is no live reading: history may still exist below it
+  const missing = n ? 'Unknown' : now.error ? 'Unavailable' : 'Loading…';
+  const hasHistory = (pick: (p: MetricPoint) => number | null) => (history.data?.points ?? []).some((p) => pick(p) != null);
+  const noLive = (pick: (p: MetricPoint) => number | null) =>
+    !n ? '—' : hasHistory(pick) ? 'No live reading · history below' : 'Not measured on this machine';
 
-      const data = await getMedia(params);
-      if (generation !== generationRef.current) return;
+  const today = backups.data?.series[backups.data.series.length - 1] ?? null;
+  const monthFiles = backups.data?.series.reduce((sum, d) => sum + d.files, 0) ?? null;
+  const vault = storage.data?.vault;
 
-      if (activeView === 'timeline') {
-        const known = new Set(reset ? [] : groupsRef.current.map(groupKey));
-        pageAddedGroupsRef.current = (data.groups || []).some(
-          (g: TimelineGroup) => g.items.length > 0 && !known.has(groupKey(g))
-        );
-        setTimelineGroups((prev) => (reset ? data.groups || [] : mergeGroups(prev, data.groups || [])));
-      } else {
-        setGalleryItems((prev) => {
-          if (reset) return data.items || [];
-          const existingIds = new Set(prev.map((i) => i.id));
-          const newItems = (data.items || []).filter((item: MediaItem) => !existingIds.has(item.id));
-          return [...prev, ...newItems];
-        });
-      }
+  const [usedValue, usedUnit] = bytesParts(n?.memory.used);
+  const [diskFree, diskFreeUnit] = bytesParts(n?.disk.free);
+  const [rxValue, rxUnit] = bytesParts(n?.network.rx_bps);
 
-      pageRef.current = pageNum;
-      hasMoreRef.current = pageNum < data.total_pages;
-      setHasMore(hasMoreRef.current);
-    } catch (err: any) {
-      if (generation !== generationRef.current) return;
-      console.error('Failed to fetch media:', err);
-      setError(err?.message || 'Failed to load media');
-    } finally {
-      if (generation === generationRef.current) {
-        inFlightRef.current = false;
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    }
-  }, [activeFilter, activeView, activeSources]);
+  // At most two problems fit the tile. Offline and disk always come first, so anything past
+  // them is a late device, which the Devices tile lists.
+  const shownProblems = problems.slice(0, 2);
+  const rest = problems.slice(2);
 
-  // Reset when filter, viewType, or sources change
-  useEffect(() => {
-    pageRef.current = 0;
-    hasMoreRef.current = true;
-    autoLoadsRef.current = 0;
-    setTimelineGroups([]);
-    setGalleryItems([]);
-    setHasMore(true);
-    setHasInitializedState(false);
-    fetchPage(true);
-  }, [fetchPage]);
-
-  useEffect(() => {
-    getMediaStats().then(setStats).catch(console.error);
-  }, []);
-
-  // Transform flat month groups into year-based groups for Timeline
-  const yearGroups = useMemo(() => {
-    if (activeView !== 'timeline') return [];
-    const grouped = new Map<number, { year: number; months: TimelineGroup[]; totalItems: number }>();
-
-    for (const group of timelineGroups) {
-      if (!grouped.has(group.year)) {
-        grouped.set(group.year, { year: group.year, months: [], totalItems: 0 });
-      }
-      const yearObj = grouped.get(group.year)!;
-      yearObj.months.push(group);
-      yearObj.totalItems += group.items.length;
-    }
-
-    return Array.from(grouped.values()).sort((a, b) => b.year - a.year);
-  }, [timelineGroups, activeView]);
-
-  // Auto-collapse logic for Timeline
-  useEffect(() => {
-    if (activeView === 'timeline' && yearGroups.length > 0 && !hasInitializedState) {
-      const latestYear = yearGroups[0].year;
-      const latestMonthKey = groupKey(yearGroups[0].months[0]);
-
-      const newCollapsedYears = new Set<number>();
-      const newExpandedMonths = new Set<string>();
-
-      for (const yg of yearGroups) {
-        if (yg.year !== latestYear) {
-          newCollapsedYears.add(yg.year);
-        }
-      }
-      newExpandedMonths.add(latestMonthKey);
-
-      setCollapsedYears(newCollapsedYears);
-      setExpandedMonths(newExpandedMonths);
-      setHasInitializedState(true);
-    }
-  }, [yearGroups, hasInitializedState, activeView]);
-
-  // Infinite scroll: load the next page when the sentinel comes into view. The observer only
-  // reports transitions, so a page that doesn't push the sentinel out of view doesn't trigger
-  // another one by itself. That matters in the timeline: pages land in collapsed months, and
-  // re-firing until the screen filled up used to chain through the entire library.
-  useEffect(() => {
-    const el = observerRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          autoLoadsRef.current = 0;
-          fetchPage(false);
-        }
-      },
-      { rootMargin: '600px 0px' }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [fetchPage]);
-
-  // Keep filling a tall viewport while pages visibly add content. A gallery page always adds a
-  // screenful of tiles; a timeline page only counts if it opened new month sections, and even
-  // then at most a few in a row.
-  useEffect(() => {
-    if (loading || loadingMore || !hasMore || error) return;
-    if (activeView === 'timeline' && (!pageAddedGroupsRef.current || autoLoadsRef.current >= 3)) return;
-    // Measure once the new content has laid out (grids size themselves after mount and the
-    // year sections animate open), or the page looks shorter than it is
-    const timer = setTimeout(() => {
-      const el = observerRef.current;
-      if (el && el.getBoundingClientRect().top < window.innerHeight + 600) {
-        autoLoadsRef.current += 1;
-        fetchPage(false);
-      }
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [galleryItems, timelineGroups, activeView, loading, loadingMore, hasMore, error, fetchPage]);
-
-  // Sticky date for the gallery: the date of the first tile row under the top bar
-  useEffect(() => {
-    if (activeView !== 'gallery' || galleryItems.length === 0) {
-      setActiveDateHeader(null);
-      return;
-    }
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      const tiles = document.querySelectorAll<HTMLElement>('[data-date]');
-      if (tiles.length === 0) return;
-      // Tiles are in grid order, so their tops never decrease: binary search instead of
-      // measuring every tile on every scroll event
-      let lo = 0;
-      let hi = tiles.length - 1;
-      let found = 0;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (tiles[mid].getBoundingClientRect().top <= 140) {
-          found = mid;
-          lo = mid + 1;
-        } else {
-          hi = mid - 1;
-        }
-      }
-      setActiveDateHeader(tiles[found].getAttribute('data-date'));
-    };
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(update);
-    };
-    schedule();
-    window.addEventListener('scroll', schedule, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener('scroll', schedule);
-    };
-  }, [activeView, galleryItems]);
-
-  const toggleYear = (year: number) => {
-    setCollapsedYears(prev => {
-      const next = new Set(prev);
-      if (next.has(year)) next.delete(year);
-      else next.add(year);
-      return next;
-    });
-  };
-
-  const toggleMonth = (key: string) => {
-    setExpandedMonths(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const isEmpty = !loading && !error && timelineGroups.length === 0 && galleryItems.length === 0;
+  const rangeControl = (
+    <GlassSegmentedControl
+      options={RANGES.map(({ key, label }) => ({ key, label }))}
+      value={range}
+      onChange={(key) => setRange(key as HistoryRange)}
+    />
+  );
 
   return (
-    <div className="min-h-screen pb-24">
+    <div className="dashboard">
       <TopBar
-        title="Library"
-        subtitle={activeDateHeader || (stats?.total_files != null ? `${stats.total_files.toLocaleString()} items · ${stats.total_size_human}` : undefined)}
-        showViewControls
-        showSourcesButton
-      />
-
-      <div className="px-4 lg:px-5 pb-8 mt-2">
-        {error && (
-          <div className="flex items-center gap-3 mb-6 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/15" role="alert">
-            <AlertCircle size={16} className="text-red-400 shrink-0" />
-            <p className="text-[12px] text-red-400 flex-1">Couldn&apos;t load your library: {error}</p>
-            <button
-              onClick={() => fetchPage(pageRef.current === 0)}
-              className="text-[12px] font-medium text-[var(--accent)] hover:underline shrink-0"
-            >
-              Retry
-            </button>
-          </div>
-        )}
-
-        {isEmpty && (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-[var(--glass-bg)] flex items-center justify-center mb-4 border border-[var(--glass-border)]">
-              <Star size={22} className="text-[var(--text-tertiary)]" />
-            </div>
-            <p className="text-sm text-[var(--text-secondary)]">No media found</p>
-            <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Try adjusting your filters</p>
-          </div>
-        )}
-
-        {activeView === 'timeline' ? (
-          /* ═══ TIMELINE VIEW ═══ */
-          <div className="space-y-12">
-            {yearGroups.map((yearGroup) => {
-              const yearCollapsed = collapsedYears.has(yearGroup.year);
-
-              return (
-                <div key={yearGroup.year} className="space-y-6">
-                  {/* Year Header */}
-                  <div className="flex items-center gap-3 w-full group">
-                    <button
-                      onClick={() => toggleYear(yearGroup.year)}
-                      aria-expanded={!yearCollapsed}
-                      className="flex items-center gap-2.5 text-left shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded-lg"
-                    >
-                      <div
-                        className={`w-6 h-6 rounded-full bg-[var(--glass-bg-hover)] flex items-center justify-center
-                          group-hover:bg-[var(--glass-bg-active)] transition duration-200
-                          ${yearCollapsed ? '' : 'rotate-90'}`}
-                      >
-                        <ChevronRight size={14} className="text-[var(--text-tertiary)]" />
-                      </div>
-                      <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)]">
-                        {yearGroup.year === 0 ? 'Old Photos' : yearGroup.year}
-                      </h1>
-                    </button>
-                    <div className="h-px bg-[var(--glass-border)] flex-1 ml-1" />
-                    <span className="text-[11px] font-medium text-[var(--text-tertiary)] shrink-0">
-                      {yearGroup.totalItems.toLocaleString()} items
-                    </span>
-                  </div>
-
-                  {/* Months */}
-                  <AnimatePresence>
-                    {!yearCollapsed && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.25 }}
-                        className="pl-2 lg:pl-4 space-y-4 overflow-hidden"
-                      >
-                        {yearGroup.months.map((group) => {
-                          const key = groupKey(group);
-                          const monthExpanded = expandedMonths.has(key);
-
-                          return (
-                            <section key={key}>
-                              <button
-                                onClick={() => toggleMonth(key)}
-                                aria-expanded={monthExpanded}
-                                className="month-header py-1 flex items-center gap-2.5 group/month w-full text-left
-                                  focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded-lg"
-                              >
-                                <div className={`transition-transform duration-200 ${monthExpanded ? 'rotate-90' : ''}`}>
-                                  <ChevronRight size={14} className="text-[var(--text-tertiary)]" />
-                                </div>
-                                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
-                                  {group.year === 0 ? 'Archive' : group.month_name}
-                                </h2>
-                                <span className="text-[11px] text-[var(--text-tertiary)] font-medium">
-                                  · {group.items.length} items
-                                </span>
-                              </button>
-
-                              <AnimatePresence>
-                                {monthExpanded && (
-                                  <motion.div
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="mt-3"
-                                  >
-                                    <MediaGrid items={group.items} />
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </section>
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          /* ═══ GALLERY VIEW ═══ */
-          <div className="w-full">
-            {galleryItems.length > 0 && <MediaGrid items={galleryItems} />}
-          </div>
-        )}
-
-        {/* Loading Indicator & Infinite Scroll Target */}
-        <div ref={observerRef} className="h-20 flex items-center justify-center mt-8">
-          {(loading || loadingMore) && (
-            <div className="flex gap-2" aria-label="Loading">
-              <div className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-bounce [animation-delay:-0.3s]" />
-              <div className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-bounce [animation-delay:-0.15s]" />
-              <div className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-bounce" />
-            </div>
-          )}
-          {hasMore && !loading && !loadingMore && !error && (timelineGroups.length > 0 || galleryItems.length > 0) && (
-            <button onClick={() => { autoLoadsRef.current = 0; fetchPage(false); }} className="glass-pill">
-              Load more
-            </button>
-          )}
-          {!hasMore && !loading && (timelineGroups.length > 0 || galleryItems.length > 0) && (
-            <p className="text-[12px] text-[var(--text-tertiary)]">You&apos;ve reached the end</p>
-          )}
+        title="Home Cloud"
+        subtitle={n ? `${n.hostname} · checked ${formatClock(now.updatedAt)}` : now.error ? 'NAS unreachable' : 'Connecting…'}
+      >
+        <div className="hidden sm:flex items-center gap-2 mr-1">
+          <span className="w-caption">System charts</span>
+          {rangeControl}
         </div>
+      </TopBar>
+
+      {/* On a phone the range control gets its own row so the title keeps its width */}
+      <div className="sm:hidden px-4 pb-3 flex items-center justify-center gap-2">
+        <span className="w-caption">Charts</span>
+        {rangeControl}
       </div>
 
+      <div className="widgets-area px-4 lg:px-6 pb-10">
+        <div className="widgets">
+          {/* Disk: reports its state in the ring and label; the whole-tile tint is Needs attention's */}
+          <Tile title="Disk" icon={HardDrive} size="large" accent={diskState}>
+            <div className="flex-1 flex items-center gap-5">
+              <Ring percent={diskPercent} state={diskState}>
+                <span className="text-[30px] font-semibold w-tabular">{diskPercent == null ? '—' : `${Math.round(diskPercent)}%`}</span>
+              </Ring>
+              <div className="min-w-0">
+                <Figure value={n?.disk.free == null ? null : diskFree} unit={`${diskFreeUnit} free`} missing={missing} className="!text-[40px]" />
+                <p className="w-caption mt-2">
+                  {formatBytes(n?.disk.used)} of {formatBytes(n?.disk.total)} used
+                </p>
+              </div>
+            </div>
+            <Sparkline points={series(month.data, (p) => p.disk_used)} from={to - 30 * 86400} to={to}
+              fit label="Disk used, last 30 days" format={(v) => formatBytes(v)} height={34} />
+            <p className="w-caption mt-1.5">
+              {fullIn == null
+                ? 'Estimating when it fills up after 3 days of data'
+                : fullIn === Infinity
+                  ? 'Not growing over the last 30 days'
+                  : fullIn < 1
+                    ? 'Full in less than a month at the 30-day rate'
+                    : `Full in about ${Math.round(fullIn)} ${Math.round(fullIn) === 1 ? 'month' : 'months'} at the 30-day rate`}
+            </p>
+          </Tile>
+
+          {/* Needs attention: the whole tile takes the state colour */}
+          <Tile title={attention === 'ok' ? 'All good' : 'Needs attention'} icon={attention === 'ok' ? CheckCircle2 : AlertTriangle}
+            size="wide" state={attention}>
+            {problems.length ? (
+              <ul className="mt-auto space-y-1">
+                {shownProblems.map((p) => (
+                  <li key={p.text} className={`${problems.length > 1 ? 'text-[15px]' : 'text-[17px]'} font-semibold leading-snug`}>{p.text}</li>
+                ))}
+                {rest.length === 1 && <li className="w-caption">{rest[0].text}</li>}
+                {rest.length > 1 && (
+                  <li className="w-caption">{rest.length} more devices are late. See Devices.</li>
+                )}
+              </ul>
+            ) : (
+              <div className="mt-auto">
+                <p className="text-[17px] font-semibold leading-snug">
+                  {n ? 'Disk, devices and the NAS look healthy.' : 'Checking the NAS…'}
+                </p>
+                {n && !n.services.api_token_enabled && (
+                  <p className="w-caption mt-1">The API token is off: anyone on the home Wi-Fi can use the API.</p>
+                )}
+              </div>
+            )}
+          </Tile>
+
+          {/* CPU */}
+          <Tile title="CPU" icon={Cpu}>
+            <Figure className="mt-auto" value={n?.cpu.percent == null ? null : String(Math.round(n.cpu.percent))} unit="%" missing={missing} />
+            <p className="w-caption mt-1">
+              {n?.cpu.percent == null && !n?.cpu.load
+                ? noLive((p) => p.cpu_percent)
+                : `Load ${n?.cpu.load ? n.cpu.load[0].toFixed(2) : '—'} · ${n?.cpu.cores ?? '—'} cores`}
+            </p>
+            <Sparkline points={series(history.data, (p) => p.cpu_percent)} from={from} to={to} max={100} height={34}
+              label={`CPU use, last ${rangeLabel}`} format={(v) => `${Math.round(v)}%`} />
+          </Tile>
+
+          {/* Memory */}
+          <Tile title="Memory" icon={MemoryStick}>
+            <Figure className="mt-auto" value={n?.memory.used == null ? null : usedValue} unit={usedUnit} missing={missing} />
+            <p className="w-caption mt-1">
+              {n?.memory.total == null
+                ? noLive((p) => p.mem_used)
+                // Swap doesn't fit a small tile reliably; climbing swap becomes a Needs-attention rule (#97 phase 4)
+                : `of ${formatBytes(n.memory.total, 0)}`}
+            </p>
+            <Sparkline points={series(history.data, (p) => p.mem_used)} from={from} to={to}
+              max={n?.memory.total ?? undefined} height={34}
+              label={`Memory used, last ${rangeLabel}`} format={(v) => formatBytes(v)} />
+          </Tile>
+
+          {/* Temperature: grey line; no threshold is set until the NAS's real sensor range is known */}
+          <Tile title="Temperature" icon={Thermometer}>
+            <Figure className="mt-auto" value={n?.temperature_c == null ? null : String(Math.round(n.temperature_c))} unit="°C" missing={missing} />
+            <p className="w-caption mt-1">
+              {n?.temperature_c == null
+                ? !n ? '—' : hasHistory((p) => p.temp_c) ? 'No live reading · history below' : 'No CPU sensor readable'
+                : tempPeak != null ? `Peak ${Math.round(tempPeak)}° in ${rangeLabel}` : 'CPU'}
+            </p>
+            <Sparkline points={series(history.data, (p) => p.temp_c)} from={from} to={to} height={34}
+              label={`CPU temperature, last ${rangeLabel}`} format={(v) => `${Math.round(v)}°C`} />
+          </Tile>
+
+          {/* Network */}
+          <Tile title="Network" icon={Network}>
+            <Figure className="mt-auto" value={n?.network.rx_bps == null ? null : rxValue} unit={`${rxUnit}/s`} missing={missing} />
+            <p className="w-caption mt-1">
+              {n?.network.tx_bps == null ? noLive((p) => p.net_rx_bps) : `In · ${formatRate(n.network.tx_bps)} out`}
+            </p>
+            <Sparkline points={series(history.data, (p) => p.net_rx_bps)} from={from} to={to} height={34}
+              label={`Network in, last ${rangeLabel}`} format={(v) => formatRate(v)} />
+          </Tile>
+
+          {/* Today */}
+          <Tile title="Backed up today" icon={Upload} size="wide">
+            <Figure className="mt-auto" value={today ? formatCount(today.files) : null} unit="files" missing={missing} />
+            <p className="w-caption mt-1.5">
+              {today
+                ? today.files
+                  ? `${formatBytes(today.bytes)} · ${formatCount(today.new_files)} new, ${formatCount(today.files - today.new_files)} already on the NAS`
+                  : 'Nothing yet today'
+                : '—'}
+            </p>
+          </Tile>
+
+          {/* Devices */}
+          <Tile title="Devices" icon={Smartphone} size="large">
+            <DeviceList devices={devices.data?.devices ?? null} />
+          </Tile>
+
+          {/* Backups per day */}
+          <Tile title="Backed up per day" icon={Upload} size="large"
+            aside={<span className="w-caption">Last 30 days</span>}>
+            <Figure className="mt-3" value={monthFiles == null ? null : formatCount(monthFiles)} unit="files" missing={missing} />
+            <div className="flex-1 flex flex-col justify-end mt-4">
+              {backups.data ? <DayBars days={backups.data.series} height={188} /> : null}
+            </div>
+          </Tile>
+
+          {/* Storage: greyscale; colour is kept for state */}
+          <Tile title="Vault" icon={Database} size="wide"
+            aside={vault && vault.dedup_saved_bytes > 0 ? <span className="w-caption">{formatBytes(vault.dedup_saved_bytes)} saved by storing duplicates once</span> : undefined}>
+            <Figure className="mt-auto" value={vault ? bytesParts(vault.stored_bytes)[0] : null}
+              unit={`${bytesParts(vault?.stored_bytes)[1]} · ${formatCount(vault?.stored_files)} files`} missing={missing} />
+            <div className="mt-3">
+              <StorageBar parts={[
+                { label: 'Photos', bytes: vault?.by_kind.photos.bytes ?? 0, color: 'var(--w-text)' },
+                { label: 'Videos', bytes: vault?.by_kind.videos.bytes ?? 0, color: 'var(--w-grey-1)' },
+                { label: 'Other', bytes: vault?.by_kind.other.bytes ?? 0, color: 'var(--w-grey-2)' },
+              ]} />
+            </div>
+          </Tile>
+
+          {/* Uptime */}
+          <Tile title="Uptime" icon={Clock}>
+            <Figure className="mt-auto" value={n?.uptime.system_seconds == null ? null : formatDuration(n.uptime.system_seconds).split(' ')[0]}
+              unit={formatDuration(n?.uptime.system_seconds).split(' ')[1]} missing={missing} />
+            <p className="w-caption mt-1">{n ? `Synaps up ${formatDuration(n.uptime.backend_seconds)}` : '—'}</p>
+          </Tile>
+
+          {/* Services */}
+          <Tile title="Synaps" icon={Activity}>
+            <dl className="mt-auto space-y-1 w-caption">
+              <div className="flex justify-between gap-2"><dt>Thumbnails queued</dt><dd className="text-[var(--w-text)]">{formatCount(n?.services.thumbnail_queue)}</dd></div>
+              <div className="flex justify-between gap-2"><dt>Library scan</dt><dd className="text-[var(--w-text)]">{n?.services.scan_running == null ? '—' : n.services.scan_running ? 'Running' : 'Idle'}</dd></div>
+              <div className="flex justify-between gap-2"><dt>Database</dt><dd className="text-[var(--w-text)]">{formatBytes(n?.services.database_bytes)}</dd></div>
+            </dl>
+          </Tile>
+        </div>
+
+        {collectingSince && to - collectingSince < rangeSeconds && (
+          <p className="w-caption mt-4">
+            Charts start at {formatWhen(new Date(collectingSince * 1000))}, when the NAS began recording these numbers.
+          </p>
+        )}
+
+        <RecentActivity />
+      </div>
     </div>
+  );
+}
+
+function DeviceList({ devices }: { devices: Device[] | null }) {
+  if (!devices) return <div className="flex-1" />;
+  if (!devices.length) {
+    return (
+      <p className="mt-auto text-[15px] leading-snug">
+        No device has backed up yet. Back up from the Synaps app on a Mac or an iPhone and it will appear here.
+      </p>
+    );
+  }
+  return (
+    <ul className="mt-2 -mx-1 overflow-y-auto no-scrollbar">
+      {devices.map((device) => {
+        const last = parseUtc(device.last_backup_at);
+        const days = daysSince(last);
+        const late = days != null && days >= STALE_DEVICE_DAYS;
+        return (
+          <li key={device.id} className="flex items-center gap-3 px-1 py-2.5 border-b border-[var(--w-rule)] last:border-0">
+            <DeviceIcon platform={device.platform} />
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-semibold truncate">{device.name}</div>
+              <div className="w-caption truncate">{formatCount(device.files)} files · {formatBytes(device.bytes)}</div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className={`text-[15px] font-semibold w-tabular ${late ? 'text-[var(--w-amber)]' : ''}`}>{formatWhen(last)}</div>
+              <div className={`w-caption ${late ? '!text-[var(--w-amber)]' : ''}`}>
+                {last == null ? 'No backups yet' : late ? `${days} days ago` : 'Last backup'}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function RecentActivity() {
+  const first = usePolling(() => getActivity(null, 15), 60_000);
+  // Everything shown so far, newest first. A refresh only prepends uploads not shown yet, so
+  // nothing already listed drops out and older pages continue from the oldest item shown.
+  const [items, setItems] = useState<ActivityItem[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const page = first.data;
+    if (!page) return;
+    setItems((prev) => {
+      if (!prev.length) {
+        setNext(page.next_before);
+        return page.items;
+      }
+      const shown = new Set(prev.map((i) => i.id));
+      return [...page.items.filter((i) => !shown.has(i.id)), ...prev];
+    });
+  }, [first.data]);
+
+  const loadMore = () => {
+    if (!next || loading) return;
+    setLoading(true);
+    setError(null);
+    getActivity(next, 25)
+      .then((page) => {
+        setItems((prev) => {
+          const shown = new Set(prev.map((i) => i.id));
+          return [...prev, ...page.items.filter((i) => !shown.has(i.id))];
+        });
+        setNext(page.next_before);
+      })
+      .catch(() => setError("Couldn't load more. Try again."))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <section aria-labelledby="activity-title" className="w mt-4 !p-0">
+      <h2 id="activity-title" className="w-label px-[18px] pt-4 pb-2">Recent activity</h2>
+      {first.data && !items.length ? (
+        <p className="px-[18px] pb-5 text-[15px]">No uploads yet.</p>
+      ) : (
+        <ul>
+          {items.map((item) => (
+            <li key={item.id} className="grid grid-cols-[112px_minmax(0,1fr)_auto] sm:grid-cols-[132px_160px_minmax(0,1fr)_auto] items-center gap-3 px-[18px] py-2.5 border-t border-[var(--w-rule)] text-[14px]">
+              <span className="w-caption w-tabular whitespace-nowrap">{formatWhen(parseUtc(item.imported_at))}</span>
+              <span className="hidden sm:block truncate text-[var(--w-text-2)]">{item.device_name ?? item.device_id}</span>
+              <span className="truncate" title={item.filename}>{item.filename}</span>
+              <span className="w-caption w-tabular text-right">{formatBytes(item.bytes)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(next || error) && (
+        <div className="px-[18px] py-3 border-t border-[var(--w-rule)] flex items-center gap-3">
+          {next && (
+            <button onClick={loadMore} disabled={loading}
+              className="text-[14px] font-semibold text-[var(--w-link)] disabled:opacity-50">
+              {loading ? 'Loading…' : 'Show older uploads'}
+            </button>
+          )}
+          {error && <span className="w-caption flex items-center gap-1"><XCircle size={14} aria-hidden />{error}</span>}
+        </div>
+      )}
+    </section>
   );
 }

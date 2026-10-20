@@ -99,7 +99,8 @@ async function recoverFromUnauthorized(sentToken: string | null): Promise<boolea
   return promptForToken(sentToken !== null);
 }
 
-async function fetchAPI(endpoint: string, options?: RequestInit) {
+/** GET/POST with the API token flow (prompts once on 401, then retries). */
+export async function fetchAPI(endpoint: string, options?: RequestInit) {
   for (;;) {
     const sentToken = getApiToken();
     const res = await fetch(`${API_BASE}${endpoint}`, options);

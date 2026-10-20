@@ -5,14 +5,17 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/lib/store';
-import { getMediaStats } from '@/lib/api';
+import { formatBytes, getSystemNow, type SystemNow } from '@/lib/system';
 import {
   LayoutGrid, Folder, Search, Upload, Trash2, Settings, X,
-  Smartphone, Monitor, Laptop, Star, Camera
+  Smartphone, Monitor, Laptop, Star, Camera, Gauge
 } from 'lucide-react';
 
+const LIBRARY = '/library';
+
 const mainNav = [
-  { href: '/', label: 'Library', icon: LayoutGrid },
+  { href: '/', label: 'Dashboard', icon: Gauge },
+  { href: LIBRARY, label: 'Library', icon: LayoutGrid },
 ];
 
 const pinnedItems = [
@@ -35,7 +38,9 @@ const utilityItems = [
 ];
 
 export function Sidebar() {
-  const pathname = usePathname();
+  // The static export uses trailing slashes (/library/); compare paths without them
+  const rawPath = usePathname() ?? '/';
+  const pathname = rawPath.length > 1 ? rawPath.replace(/\/$/, '') : rawPath;
   const router = useRouter();
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
@@ -44,13 +49,13 @@ export function Sidebar() {
   const activeSources = useAppStore((s) => s.activeSources);
   const toggleSource = useAppStore((s) => s.toggleSource);
 
-  const [storageData, setStorageData] = useState<any>(null);
+  const [disk, setDisk] = useState<SystemNow['disk'] | null>(null);
 
-  // /media/stats is cached and shared with the Library page. /settings/storage-usage would
-  // also walk the whole thumbnail cache on disk, on every page load.
+  // The storage volume's real usage. /system/now is cheap (statvfs, no tree walk), and the
+  // dashboard keeps its own live copy, so the sidebar reads it once per load.
   useEffect(() => {
-    getMediaStats()
-      .then(setStorageData)
+    getSystemNow()
+      .then((now) => setDisk(now.disk))
       .catch(() => {});
   }, []);
 
@@ -103,7 +108,7 @@ export function Sidebar() {
               <div className="text-[14px] font-semibold tracking-tight text-[var(--text-primary)]">
                 Synaps
               </div>
-              <div className="text-[10px] text-[var(--text-tertiary)] -mt-0.5">
+              <div className="text-[11px] text-[var(--text-secondary)] -mt-0.5">
                 Personal Media Cloud
               </div>
             </div>
@@ -128,9 +133,9 @@ export function Sidebar() {
                   key={item.label}
                   href={item.href}
                   onClick={handleNavClick}
-                  className={`nav-item ${active ? 'nav-item-active text-[var(--accent)]' : ''}`}
+                  className={`nav-item ${active ? 'nav-item-active' : ''}`}
                 >
-                  <Icon size={16} strokeWidth={active ? 2 : 1.5} className={active ? "text-[var(--accent)]" : ""} />
+                  <Icon size={16} strokeWidth={active ? 2 : 1.5} />
                   {item.label}
                 </Link>
               );
@@ -166,8 +171,8 @@ export function Sidebar() {
                     onClick={() => {
                       handleFilterClick(item.key);
                       // If we are applying a filter but not on the library page, navigate to library
-                      if (pathname !== '/') {
-                        router.push('/');
+                      if (pathname !== LIBRARY) {
+                        router.push(LIBRARY);
                       }
                     }}
                     className={`nav-item w-full ${active ? 'nav-item-active' : ''}`}
@@ -195,8 +200,8 @@ export function Sidebar() {
                   onClick={() => {
                     handleSourceClick(item.key);
                     // If we are applying a source filter but not on the library page, navigate to library
-                    if (pathname !== '/') {
-                      router.push('/');
+                    if (pathname !== LIBRARY) {
+                      router.push(LIBRARY);
                     }
                   }}
                   className={`nav-item w-full ${active ? 'nav-item-active' : ''}`}
@@ -234,32 +239,24 @@ export function Sidebar() {
         {/* ── Storage Indicator ── */}
         <div className="px-4 py-4 border-t border-[var(--glass-border)] bg-[var(--bg-deep)]/20">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-medium text-[var(--text-secondary)]">
-              Storage
-            </span>
-            {storageData && (
-              <span className="text-[10px] text-[var(--text-tertiary)]">
-                {storageData.total_size_human} indexed
-              </span>
+            <span className="text-[12px] font-medium text-[var(--text-secondary)]">Disk</span>
+            {disk?.free != null && (
+              <span className="text-[12px] text-[var(--text-secondary)]">{formatBytes(disk.free)} free</span>
             )}
           </div>
-          <div className="storage-bar">
-            <div
-              className="storage-bar-fill"
-              style={{
-                width: storageData
-                  ? `${Math.min((storageData.total_files / Math.max(storageData.total_files * 2, 1)) * 100, 50)}%`
-                  : '0%'
-              }}
-            />
+          <div className="storage-bar" role="meter" aria-label="Disk used" aria-valuemin={0} aria-valuemax={100}
+            aria-valuenow={disk?.percent ?? undefined}>
+            {/* Same thresholds and colours as the dashboard's Disk tile */}
+            <div className="storage-bar-fill" style={{
+              width: `${disk?.percent ?? 0}%`,
+              background: (disk?.percent ?? 0) >= 95 ? 'var(--w-red-fill)'
+                : (disk?.percent ?? 0) >= 85 ? 'var(--w-amber-fill)' : 'var(--w-green-fill)',
+            }} />
           </div>
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[10px] text-[var(--text-tertiary)]">
-              {storageData
-                ? `${storageData.total_files?.toLocaleString()} files`
-                : '—'
-              }
-            </span>
+          <div className="mt-1.5 text-[12px] text-[var(--text-secondary)]">
+            {disk?.used != null && disk.total != null
+              ? `${formatBytes(disk.used)} of ${formatBytes(disk.total)} used`
+              : '—'}
           </div>
         </div>
       </aside>
