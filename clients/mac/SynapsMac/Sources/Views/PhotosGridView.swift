@@ -295,7 +295,9 @@ public struct PhotosGridView: View {
                     .frame(maxWidth: .infinity, minHeight: 600, alignment: .topLeading)
                 }
                 .background(
+                    // Extend under the toolbar so it fades into the grid instead of ending in a hard band
                     Color(nsColor: .windowBackgroundColor)
+                        .ignoresSafeArea(edges: .top)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             viewModel.clearSelection()
