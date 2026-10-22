@@ -189,12 +189,29 @@ private extension View {
     func softTopScrollEdge() -> some View {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
-            self.scrollEdgeEffectStyle(.soft, for: .top)
+            self
+                .background { ToolbarScrollEdgeAnchor() }
+                .scrollEdgeEffectStyle(.soft, for: .top)
         } else {
             self
         }
         #else
         self
         #endif
+    }
+}
+
+/// An empty list kept behind the detail content. On macOS 26 the toolbar keeps its soft edge only
+/// while a list-backed scroll view sits under it. On a page without one (an empty or loading folder,
+/// Home Cloud offline, no iPhone) AppKit switches to the hard edge, and it stays hard, even in icon
+/// view, until a list shows again. With this list always there, every page keeps the soft edge.
+/// It has no rows, draws nothing and ignores clicks.
+@available(macOS 26.0, *)
+private struct ToolbarScrollEdgeAnchor: View {
+    var body: some View {
+        List {}
+            .scrollContentBackground(.hidden)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
