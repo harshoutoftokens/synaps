@@ -59,6 +59,8 @@ EXTRA_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_media_files_file_size ON media_files (file_size)",
     # timeline keyset paging: ORDER BY date_taken, id
     "CREATE INDEX IF NOT EXISTS ix_media_files_date_taken_id ON media_files (date_taken, id)",
+    # stats dashboard: backups per day and recent activity (routers/system.py)
+    "CREATE INDEX IF NOT EXISTS ix_logical_items_imported_at ON logical_items (imported_at)",
 ]
 
 
@@ -111,6 +113,7 @@ def init_db():
     """Create all tables (v1 and v2), add columns missing from older databases, extra indexes."""
     from models import MediaFile, TrashItem, SyncRecord, Setting  # noqa: F401
     import models_v2  # noqa: F401  (registers the v2 tables on Base.metadata)
+    import system_metrics  # noqa: F401  (registers the metrics tables)
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         added = add_missing_columns(conn)

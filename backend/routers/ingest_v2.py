@@ -580,7 +580,8 @@ def _upsert_source(db: Session, reg: SourceRegistration) -> Source:
         db.add(source)
     else:
         source.friendly_name = reg.friendly_name
-        source.last_seen_at = datetime.now()
+        # UTC, like the column's default (SQLite's CURRENT_TIMESTAMP) and every other v2 timestamp
+        source.last_seen_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.flush()
     return source
 
