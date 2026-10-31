@@ -189,18 +189,31 @@ The redesign is not complete. As of the checkpoint:
 
 ---
 
-## Current State (July 2026)
+## Phase 6 — Native Mac App & Home Cloud Vault (September 30 – October 9, 2026)
 
-Synaps is on the `UI-redesign-opus` branch, mid-way through the Phase 5 visual redesign. The core application is fully functional — scanner, importer, timeline, gallery, search, trash, sync — all working on the real NAS.
+The web dashboard could show what was on the NAS, but getting files onto it was still manual. Phase 6 added a native macOS app, SynapsMac, modelled on Finder: icon and list views, Finder-style selection, Quick Look, and a green tick on every file that is already on the NAS.
 
-The next steps are:
-1. Complete the UI redesign (sticky headers, settings page, light theme polish)
-2. Merge `UI-redesign-opus` back into `main`
-3. Tag `v0.5.0` as the first release with the Apple Photos aesthetic
-4. Begin v0.6 stability work (orphan cleanup, scan progress, hash consistency)
+Behind it, uploads moved to a new "v2" storage model. Every file is stored once, named after its SHA-256 (`Vault/YYYY/MM/<sha16>_<name>`), and each device gets a hardlink mirror of its own folder structure under `Mirrors/`. Before uploading, the app asks the NAS which hashes it already has (`/api/v2/ingest/check`), so a file that exists anywhere on the NAS is linked instead of sent again. The Mac app also gained a NAS browser ("Home Cloud"), iPhone import over USB, and thumbnails pre-generated on upload.
+
+## Phase 7 — Native iPhone App (October 3 – 9, 2026)
+
+SynapsiOS brought the same model to the phone: an Apple Photos–style timeline with green ticks and red crosses, automatic backup on home Wi-Fi in the background, an "Uncommitted" tab, and a NAS vault browser.
+
+## Phase 8 — Audit, Hardening & Continuous Deployment (October 13 – 15, 2026)
+
+A full audit found that a fresh checkout of the backend could not start (two v2 modules had never been committed), that upload paths could escape the storage folder, and that deploying meant SSH-ing in and running scripts by hand. The fixes landed as a series of stacked pull requests: the missing modules, path confinement and an optional API token, streaming uploads, SQLite WAL mode, a sturdier thumbnail pipeline, and fixes across the web app and both native apps.
+
+Deployment became automatic. One script, `./synaps`, installs and manages everything; GitHub Actions tests every change; and a timer on the NAS pulls `main` every five minutes, deploys only commits whose CI passed, health-checks, and rolls back on failure. The first deploy on the real NAS surfaced a database created by an older schema, which led to startup adding missing columns automatically.
+
+Two iPhone features followed: photos that reached the NAS another way (through the Mac) are now matched by name and size and ticked without uploading, and a Lock Screen Live Activity shows backup progress. The audit also found that many files migrated from the old layout carry a stored hash that doesn't match their content, which is now the top item on the [roadmap](roadmap.md).
+
+---
+
+## Current State (October 2026)
+
+The NAS runs the backend as a systemd service, serves the web app itself, and updates itself from `main`. The Mac and iPhone apps are the main way files reach the NAS; the web timeline is secondary. Documentation was rewritten from the code in October 2026 ([docs/README.md](../README.md)).
 
 ---
 
 *This document should be updated at the end of each major phase.*
-*See [CHANGELOG.md](CHANGELOG.md) for a version-by-version summary.*
-*See [ROADMAP.md](ROADMAP.md) for what's planned next.*
+*See the [changelog](../../CHANGELOG.md) for a version-by-version summary and the [roadmap](roadmap.md) for what is planned next.*

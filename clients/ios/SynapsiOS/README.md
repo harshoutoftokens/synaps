@@ -2,6 +2,8 @@
 
 An authentic, native Apple Photos client for **Synaps NAS** on iOS 16+.
 
+> How it works under the hood (library indexing, the sync pipeline, background uploads, matching, the Live Activity): [docs/09-iphone-app.md](../../../docs/09-iphone-app.md).
+
 Synaps iOS brings the elegance and speed of Apple Photos together with your private Synaps self-hosted NAS vault. It automatically backs up your camera roll and imported media over Wi-Fi, provides instant visual feedback for commit statuses, and gives you manual selection and synchronization control matching the Synaps Mac desktop experience.
 
 ---
@@ -48,7 +50,7 @@ Synaps iOS brings the elegance and speed of Apple Photos together with your priv
 ### 8. 🔒 Backup Progress on the Lock Screen
 While a backup runs, a Live Activity shows it on the Lock Screen (and in the Dynamic Island on iPhones that have one): a progress bar with `412/1,021` beside it and the file being uploaded. It turns into "Your backup is complete" with a green check when done, or an orange "Backup paused" with the reason. Turn it off in **Settings → Show Progress on Lock Screen**.
 
-![Lock Screen backup progress](lock-screen-preview.png)
+![Lock Screen backup progress](../../../docs/images/ios-lock-screen-progress.png)
 
 Notes: iOS only lets an app *start* a Live Activity while it is open, so a backup that the background worker starts on its own runs without one. While the app is suspended and only background uploads are running, the count can't update; after 5 minutes the banner says "Uploading in the background". Implemented by the `SynapsSyncActivity` widget extension (`Widgets/`) and `Sources/Services/SyncLiveActivity.swift`.
 

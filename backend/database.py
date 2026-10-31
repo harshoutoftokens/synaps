@@ -2,7 +2,7 @@
 Synaps Database Setup - SQLite via SQLAlchemy
 """
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
 from config import DATABASE_URL, SQLITE_BUSY_TIMEOUT_MS
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
@@ -97,10 +97,14 @@ def _fill_media_sources(conn):
         "SELECT id, relative_path FROM media_files WHERE source IS NULL"
     ).fetchall()
     if rows:
-        conn.exec_driver_sql(
-            "UPDATE media_files SET source = ? WHERE id = ?",
-            [(derive_source(rel or ""), row_id) for row_id, rel in rows],
-        )
+        # A session on the same connection lets derive_source look up the uploading device of
+        # v2 canonical files (Vault/YYYY/MM/<sha>_name); without it they would get "unknown".
+        session = Session(bind=conn)
+        try:
+            updates = [(derive_source(rel or "", session), row_id) for row_id, rel in rows]
+        finally:
+            session.close()
+        conn.exec_driver_sql("UPDATE media_files SET source = ? WHERE id = ?", updates)
 
 
 def init_db():

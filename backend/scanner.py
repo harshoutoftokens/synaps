@@ -510,7 +510,7 @@ def _garbage_collect(db: Session, stats: dict, allow_mass_delete: bool) -> None:
         logger.warning(
             f"Not deleting {len(missing)} of {len(rows)} records whose files are missing: that looks "
             f"like a storage problem, not deleted files. If it is real, run "
-            f"clean_stale_records.py --dry-run, then --execute."
+            f"scripts/clean_stale_records.py --dry-run, then --execute."
         )
         stats["gc_skipped"] = "too_many_missing"
         missing = []
