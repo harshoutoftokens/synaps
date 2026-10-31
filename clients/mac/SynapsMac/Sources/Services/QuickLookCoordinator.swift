@@ -1,8 +1,7 @@
 import Cocoa
 import QuickLookUI
 
-@MainActor
-public final class QuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
+public final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     public static let shared = QuickLookCoordinator()
     
     private var currentUrls: [URL] = []
@@ -14,11 +13,8 @@ public final class QuickLookCoordinator: NSObject, @preconcurrency QLPreviewPane
     }
     
     public func updatePreviewItems(_ urls: [URL]) {
-        // Called on every selection change ("Select All" in a big folder): only stat the files when
-        // the panel is actually showing; toggleQuickLook filters again before opening it.
-        let panelVisible = QLPreviewPanel.sharedPreviewPanelExists() && (QLPreviewPanel.shared()?.isVisible ?? false)
-        self.currentUrls = panelVisible ? urls.filter { FileManager.default.fileExists(atPath: $0.path) } : urls
-        if panelVisible, let panel = QLPreviewPanel.shared() {
+        self.currentUrls = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
+        if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible {
             if self.currentUrls.isEmpty {
                 panel.orderOut(nil)
             } else {
@@ -28,7 +24,9 @@ public final class QuickLookCoordinator: NSObject, @preconcurrency QLPreviewPane
     }
     
     public func toggleQuickLook(for urls: [URL]? = nil) {
-        self.currentUrls = (urls ?? currentUrls).filter { FileManager.default.fileExists(atPath: $0.path) }
+        if let urls = urls {
+            self.currentUrls = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
+        }
         
         guard let panel = QLPreviewPanel.shared() else { return }
         

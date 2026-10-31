@@ -2,22 +2,13 @@ import Foundation
 import ImageIO
 import AVFoundation
 
-public final class ItemInfoLoader: @unchecked Sendable {
+public final class ItemInfoLoader {
     public static let shared = ItemInfoLoader()
     private let cache = NSCache<NSString, NSString>()
-    /// Bounded: every visible cell used to put blocking file I/O on an unbounded concurrent queue.
-    private let queue = OperationQueue()
-    private let decimalFormatter: NumberFormatter = {
-        let nf = NumberFormatter()
-        nf.numberStyle = .decimal
-        return nf
-    }()
+    private let queue = DispatchQueue(label: "com.synaps.iteminfoqueue", qos: .utility, attributes: .concurrent)
     
     private init() {
         cache.countLimit = 600
-        queue.name = "com.synaps.iteminfoqueue"
-        queue.maxConcurrentOperationCount = 3
-        queue.qualityOfService = .utility
     }
     
     public func getCachedInfo(for path: String) -> String? {
@@ -31,7 +22,7 @@ public final class ItemInfoLoader: @unchecked Sendable {
             return
         }
         
-        queue.addOperation {
+        queue.async {
             var info: String = ""
             
             if item.isDirectory {
@@ -54,8 +45,10 @@ public final class ItemInfoLoader: @unchecked Sendable {
                        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                        let w = props[kCGImagePropertyPixelWidth] as? Int,
                        let h = props[kCGImagePropertyPixelHeight] as? Int {
-                        let wStr = self.decimalFormatter.string(from: NSNumber(value: w)) ?? "\(w)"
-                        let hStr = self.decimalFormatter.string(from: NSNumber(value: h)) ?? "\(h)"
+                        let nf = NumberFormatter()
+                        nf.numberStyle = .decimal
+                        let wStr = nf.string(from: NSNumber(value: w)) ?? "\(w)"
+                        let hStr = nf.string(from: NSNumber(value: h)) ?? "\(h)"
                         info = "\(wStr) × \(hStr)"
                     } else {
                         info = item.formattedSize

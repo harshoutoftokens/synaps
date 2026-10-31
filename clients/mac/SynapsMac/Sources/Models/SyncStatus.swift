@@ -1,6 +1,6 @@
 import SwiftUI
 
-public enum SyncStatus: String, Codable, CaseIterable, Sendable {
+public enum SyncStatus: String, Codable, CaseIterable {
     case committed      // 🟢 Synced and verified in NAS vault
     case uncommitted    // 🔴 New or modified file, not yet on NAS
     case syncing        // ⏳ Currently transferring

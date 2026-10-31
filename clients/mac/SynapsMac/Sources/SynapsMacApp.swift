@@ -13,9 +13,5 @@ public struct SynapsMacApp: App {
         .commands {
             SidebarCommands()
         }
-        
-        Settings {
-            SettingsView()
-        }
     }
 }
