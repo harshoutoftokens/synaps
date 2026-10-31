@@ -115,7 +115,7 @@ cd synaps
 ./synaps test       # backend tests, web lint + build, Mac app tests
 ```
 
-Without a `backend/.env`, the backend serves the sample library in `mock_storage/`. Settings such as the storage path, API token and owner name are listed in [`backend/.env.example`](backend/.env.example).
+Without a `backend/.env`, the backend stores everything in `mock_storage/`. That folder is git-ignored and starts empty, so add a few photos to it (or fill it with [`copy_sample_media.py`](backend/scripts/copy_sample_media.py)) to see something in the web app. Settings such as the storage path, API token and owner name are listed in [`backend/.env.example`](backend/.env.example).
 
 ### Build the apps
 
