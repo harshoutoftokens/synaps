@@ -35,6 +35,7 @@ public struct SyncActivityItem: Identifiable, Codable {
         case syncStarted = "sync_started"
         case syncCompleted = "sync_completed"
         case syncFailed = "sync_failed"
+        case syncCancelled = "sync_cancelled"
         case statusReconciled = "status_reconciled"
         
         public var title: String {
@@ -45,6 +46,7 @@ public struct SyncActivityItem: Identifiable, Codable {
             case .syncStarted: return "Sync Started"
             case .syncCompleted: return "Sync Completed"
             case .syncFailed: return "Sync Failed"
+            case .syncCancelled: return "Sync Cancelled"
             case .statusReconciled: return "NAS State Reconciled"
             }
         }
@@ -57,6 +59,7 @@ public struct SyncActivityItem: Identifiable, Codable {
             case .syncStarted: return "arrow.triangle.2.circlepath"
             case .syncCompleted: return "checkmark.circle.fill"
             case .syncFailed: return "exclamationmark.triangle.fill"
+            case .syncCancelled: return "stop.circle.fill"
             case .statusReconciled: return "arrow.2.squarepath"
             }
         }
@@ -67,6 +70,7 @@ public struct SyncActivityItem: Identifiable, Codable {
             case .fileSynced, .folderSynced, .syncCompleted: return .green
             case .syncStarted, .statusReconciled: return .accentColor
             case .syncFailed: return .red
+            case .syncCancelled: return .orange
             }
         }
     }
