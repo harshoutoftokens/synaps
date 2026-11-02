@@ -24,6 +24,7 @@ from database import init_db, SessionLocal
 from scanner import scan_directory
 from config import HOST, PORT, THUMBNAIL_DIR, TRASH_DIR, IMPORT_SOURCE_DIR
 from storage_engine import sweep_stale_staging
+import system_metrics
 
 # Configure structured logging
 logging.basicConfig(
@@ -122,6 +123,7 @@ async def lifespan(app: FastAPI):
     os.makedirs(IMPORT_SOURCE_DIR, exist_ok=True)
 
     threading.Thread(target=_housekeeping_loop, name="synaps-housekeeping", daemon=True).start()
+    system_metrics.start_sampler(config.METRICS_INTERVAL_SECONDS)
     if config.API_TOKEN:
         logger.info("API token auth is enabled for /api/*")
 
@@ -228,6 +230,7 @@ from routers.trash import router as trash_router
 from routers.settings import router as settings_router
 from routers.imports import router as imports_router
 from routers.ingest_v2 import router as ingest_v2_router
+from routers.system import router as system_router
 
 app.include_router(media_router)
 app.include_router(finder_router)
@@ -237,6 +240,7 @@ app.include_router(trash_router)
 app.include_router(settings_router)
 app.include_router(imports_router)
 app.include_router(ingest_v2_router)
+app.include_router(system_router)
 
 
 @app.get("/api/health")
