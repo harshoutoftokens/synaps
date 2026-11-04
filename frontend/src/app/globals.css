@@ -13,7 +13,7 @@
 
 :root {
   /* Background atmosphere (Light) */
-  --bg-deep: #ffffff;
+  --bg-deep: #f2f2f7;
   --bg-gradient: none;
 
   /* Glass surfaces (Light) */
@@ -42,8 +42,8 @@
 
   /* Text (Light) */
   --text-primary: rgba(0, 0, 0, 0.9);
-  --text-secondary: rgba(0, 0, 0, 0.55);
-  --text-tertiary: rgba(0, 0, 0, 0.4);
+  --text-secondary: rgba(0, 0, 0, 0.62);
+  --text-tertiary: rgba(0, 0, 0, 0.55);
   --text-muted: rgba(0, 0, 0, 0.25);
 
   /* Spacing */
@@ -59,7 +59,7 @@
 
 .dark {
   /* Background atmosphere (Dark) */
-    --bg-deep: #000000;
+    --bg-deep: #0e0f10;
     
     /* Glass surfaces (Dark) */
     --glass-bg: rgba(30, 30, 30, 0.6);
@@ -76,7 +76,7 @@
     /* Text (Dark) */
     --text-primary: rgba(255, 255, 255, 0.92);
     --text-secondary: rgba(255, 255, 255, 0.6);
-    --text-tertiary: rgba(255, 255, 255, 0.4);
+    --text-tertiary: rgba(255, 255, 255, 0.55);
     --text-muted: rgba(255, 255, 255, 0.25);
   }
 
@@ -92,7 +92,7 @@ html {
 }
 
 body {
-  font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overscroll-behavior: none;
@@ -184,6 +184,192 @@ body {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ── Stats dashboard: widget tiles ──────────────────────────
+   The home page (app/page.tsx). Apple widget language: raised tiles in three sizes on a
+   near-black (or light grey) ground; colour only for state (green ok, amber attention,
+   red critical). A tile changes state as a whole rather than gaining a badge. */
+
+:root {
+  --w-ground: #f2f2f7;
+  --w-tile: #ffffff;
+  --w-track: #e5e5ea;
+  --w-rule: rgba(60, 60, 67, 0.12);
+  --w-text: rgba(0, 0, 0, 0.88);
+  --w-text-2: #636366;
+  --w-green: #1f7a35;
+  --w-green-fill: #34c759;
+  --w-green-soft: #c9ecd3;
+  --w-amber: #b25000;
+  --w-amber-fill: #ff9f0a;
+  --w-amber-tile: #fff3e0;
+  --w-red: #c4000f;
+  --w-red-fill: #ff3b30;
+  --w-red-tile: #ffebe9;
+  --w-blue-fill: #0a84ff;
+  --w-link: #0060d1;
+  --w-grey-1: #8e8e93;
+  --w-grey-2: #c7c7cc;
+  --w-pop: #1d1f21;
+  --w-pop-text: #f2f2f7;
+}
+
+.dark {
+  --w-ground: #0e0f10;
+  --w-tile: #1d1f21;
+  --w-track: #2c2e31;
+  --w-rule: rgba(255, 255, 255, 0.08);
+  --w-text: #f2f2f7;
+  --w-text-2: #aeaeb2;
+  --w-green: #34c759;
+  --w-green-fill: #34c759;
+  --w-green-soft: #2b5236;
+  --w-amber: #ffb340;
+  --w-amber-fill: #ff9f0a;
+  --w-amber-tile: #33260f;
+  --w-red: #ff6961;
+  --w-red-fill: #ff453a;
+  --w-red-tile: #3a1714;
+  --w-blue-fill: #0a84ff;
+  --w-link: #4aa3ff;
+  --w-grey-1: #8e8e93;
+  --w-grey-2: #48484a;
+  --w-pop: #3a3c3f;
+  --w-pop-text: #f2f2f7;
+}
+
+.dashboard {
+  background: var(--w-ground);
+  color: var(--w-text);
+  min-height: 100vh;
+}
+
+.dashboard ::selection {
+  background: var(--w-green-soft);
+  color: var(--w-text);
+}
+
+/* Columns follow the space beside the sidebar, not the window: 2, 4 or 6, like a widget stack.
+   Tile order in app/page.tsx is chosen so each count packs without holes. */
+.widgets-area { container-type: inline-size; }
+
+.widgets {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 168px;
+  grid-auto-flow: row dense;
+}
+
+@container (min-width: 720px) {
+  .widgets { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@container (min-width: 1100px) {
+  .widgets { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+.w {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  border-radius: 22px;
+  background: var(--w-tile);
+  overflow: hidden;
+  transition: background-color 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.w-wide { grid-column: span 2; }
+.w-large { grid-column: span 2; grid-row: span 2; }
+.w[data-state='warn'] { background: var(--w-amber-tile); }
+.w[data-state='crit'] { background: var(--w-red-tile); }
+
+.w-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--w-text-2);
+}
+
+.w[data-state='warn'] .w-label,
+.w[data-accent='warn'] .w-label { color: var(--w-amber); }
+.w[data-state='crit'] .w-label,
+.w[data-accent='crit'] .w-label { color: var(--w-red); }
+
+.w-figure {
+  font-family: ui-rounded, -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', system-ui, sans-serif;
+  font-size: 44px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.w-large .w-figure { font-size: 54px; }
+
+/* A reading that doesn't exist says so in words, at a size that can't pass for a number */
+.w-figure.w-missing {
+  font-family: inherit;
+  font-size: 17px;
+  letter-spacing: 0;
+  color: var(--w-text-2);
+}
+
+.w-unit {
+  margin-left: 3px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--w-text-2);
+}
+
+.w-caption {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--w-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.w-tabular { font-variant-numeric: tabular-nums; }
+
+.dashboard :focus-visible {
+  outline: 2px solid var(--w-blue-fill);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Bars of the backups chart: each is focusable and shows its numbers in a tooltip */
+.w-bar { position: relative; flex: 1; display: flex; align-items: flex-end; height: 100%; }
+.w-bar-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 6px 9px;
+  border-radius: 10px;
+  background: var(--w-pop);
+  color: var(--w-pop-text);
+  font-size: 12px;
+  line-height: 1.3;
+  pointer-events: none;
+  z-index: 2;
+}
+/* Sparkline readout: same material as the bar tips, pinned above the chart */
+.w-spark { position: relative; outline-offset: 4px; }
+.w-spark .w-bar-tip { bottom: calc(100% + 4px); }
+
+/* Tiles clip their content, so tips near an edge open inward instead of centring */
+.w-bar[data-align='start'] .w-bar-tip { left: 0; transform: none; }
+.w-bar[data-align='end'] .w-bar-tip { left: auto; right: 0; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .w { transition: none; }
 }
 
 /* ── Media Grid ─────────────────────────────────────────── */
@@ -343,10 +529,13 @@ body {
   color: #fff;
 }
 
+.dark .nav-item-active { color: var(--accent-light); }
+
+/* White labels need the darker blue to stay readable (about 5.9:1) */
 .segmented-control-indicator {
   position: absolute;
   border-radius: var(--radius-pill);
-  background: var(--accent);
+  background: var(--accent-dark);
   box-shadow: 0 2px 12px var(--accent-glow);
 }
 
@@ -388,7 +577,8 @@ body {
 
 .nav-item-active {
   background: var(--accent-muted);
-  color: var(--accent-light);
+  /* Darker than --accent-dark: the tinted row on the light ground needs it for 4.5:1 */
+  color: #004fae;
   border-color: rgba(108, 138, 255, 0.1);
 }
 

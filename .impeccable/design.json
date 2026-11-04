@@ -1,0 +1,708 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-20T18:39:56+00:00",
+  "title": "Design System: Synaps",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Night Ground",
+        "canonical": "#0e0f10",
+        "tonalRamp": [
+          "#242629",
+          "#404549",
+          "#5d636a",
+          "#7a828a",
+          "#9aa1a7",
+          "#bbbfc3",
+          "#d9dbde",
+          "#f1f2f3"
+        ]
+      },
+      "ground-light": {
+        "role": "neutral",
+        "displayName": "Night Ground (light theme)",
+        "canonical": "#f2f2f7",
+        "tonalRamp": [
+          "#1d1d2f",
+          "#343455",
+          "#4c4c7b",
+          "#6464a0",
+          "#8a8ab7",
+          "#b0b0ce",
+          "#d3d3e4",
+          "#efeff5"
+        ]
+      },
+      "tile": {
+        "role": "neutral",
+        "displayName": "Raised Tile",
+        "canonical": "#1d1f21",
+        "tonalRamp": [
+          "#242629",
+          "#404549",
+          "#5d636a",
+          "#7a828a",
+          "#9ba1a7",
+          "#bbbfc3",
+          "#d9dbde",
+          "#f1f2f3"
+        ]
+      },
+      "tile-light": {
+        "role": "neutral",
+        "displayName": "Raised Tile (light theme)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#262626",
+          "#454545",
+          "#636363",
+          "#828282",
+          "#a1a1a1",
+          "#bfbfbf",
+          "#dbdbdb",
+          "#f2f2f2"
+        ]
+      },
+      "track": {
+        "role": "neutral",
+        "displayName": "Track",
+        "canonical": "#2c2e31",
+        "tonalRamp": [
+          "#242628",
+          "#414449",
+          "#5e6269",
+          "#7b8189",
+          "#9ca0a6",
+          "#bcbfc3",
+          "#d9dbdd",
+          "#f2f2f3"
+        ]
+      },
+      "track-light": {
+        "role": "neutral",
+        "displayName": "Track (light theme)",
+        "canonical": "#e5e5ea",
+        "tonalRamp": [
+          "#22222a",
+          "#3e3e4c",
+          "#59596e",
+          "#75758f",
+          "#9797ab",
+          "#b8b8c6",
+          "#d8d8df",
+          "#f1f1f4"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgba(255, 255, 255, 0.08)",
+        "tonalRamp": []
+      },
+      "rule-light": {
+        "role": "neutral",
+        "displayName": "Hairline (light theme)",
+        "canonical": "rgba(60, 60, 67, 0.12)",
+        "tonalRamp": []
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "#f2f2f7",
+        "tonalRamp": [
+          "#1d1d2f",
+          "#343455",
+          "#4c4c7b",
+          "#6464a0",
+          "#8a8ab7",
+          "#b0b0ce",
+          "#d3d3e4",
+          "#efeff5"
+        ]
+      },
+      "text-light": {
+        "role": "neutral",
+        "displayName": "Text (light theme)",
+        "canonical": "rgba(0, 0, 0, 0.88)",
+        "tonalRamp": []
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Text",
+        "canonical": "#aeaeb2",
+        "tonalRamp": [
+          "#252527",
+          "#434347",
+          "#616166",
+          "#7f7f85",
+          "#9e9ea3",
+          "#bebec1",
+          "#dadadc",
+          "#f2f2f3"
+        ]
+      },
+      "text-secondary-light": {
+        "role": "neutral",
+        "displayName": "Secondary Text (light theme)",
+        "canonical": "#636366",
+        "tonalRamp": [
+          "#262627",
+          "#444446",
+          "#626265",
+          "#808084",
+          "#9f9fa2",
+          "#bebec0",
+          "#dbdbdc",
+          "#f2f2f2"
+        ]
+      },
+      "grey-1": {
+        "role": "neutral",
+        "displayName": "Grey 1",
+        "canonical": "#8e8e93",
+        "tonalRamp": [
+          "#252527",
+          "#434346",
+          "#616166",
+          "#7f7f85",
+          "#9f9fa3",
+          "#bebec1",
+          "#dadadc",
+          "#f2f2f3"
+        ]
+      },
+      "grey-2": {
+        "role": "neutral",
+        "displayName": "Grey 2",
+        "canonical": "#48484a",
+        "tonalRamp": [
+          "#262627",
+          "#444446",
+          "#626265",
+          "#808084",
+          "#9f9fa2",
+          "#bebec0",
+          "#dbdbdc",
+          "#f2f2f2"
+        ]
+      },
+      "grey-2-light": {
+        "role": "neutral",
+        "displayName": "Grey 2 (light theme)",
+        "canonical": "#c7c7cc",
+        "tonalRamp": [
+          "#242428",
+          "#424248",
+          "#5f5f68",
+          "#7c7c88",
+          "#9c9ca5",
+          "#bcbcc2",
+          "#dadadd",
+          "#f2f2f3"
+        ]
+      },
+      "green-fill": {
+        "role": "primary",
+        "displayName": "Healthy Green",
+        "canonical": "#34c759",
+        "tonalRamp": [
+          "#103d1b",
+          "#1d6d31",
+          "#299e47",
+          "#39cb5e",
+          "#69d885",
+          "#9ae5ad",
+          "#c6f0d1",
+          "#ebfaef"
+        ]
+      },
+      "green-soft": {
+        "role": "primary",
+        "displayName": "Muted Green",
+        "canonical": "#2b5236",
+        "tonalRamp": [
+          "#1a3221",
+          "#2f5a3b",
+          "#448256",
+          "#5ba971",
+          "#83be94",
+          "#abd3b7",
+          "#d0e6d6",
+          "#eef6f1"
+        ]
+      },
+      "green-soft-light": {
+        "role": "primary",
+        "displayName": "Muted Green (light theme)",
+        "canonical": "#c9ecd3",
+        "tonalRamp": [
+          "#14391e",
+          "#246637",
+          "#34934f",
+          "#46be68",
+          "#73ce8d",
+          "#a1deb2",
+          "#caecd4",
+          "#ecf8f0"
+        ]
+      },
+      "amber-fill": {
+        "role": "secondary",
+        "displayName": "Attention Amber",
+        "canonical": "#ff9f0a",
+        "tonalRamp": [
+          "#4c2f00",
+          "#8a5400",
+          "#c77900",
+          "#ff9d05",
+          "#ffb542",
+          "#ffcd80",
+          "#ffe3b8",
+          "#fff5e5"
+        ]
+      },
+      "amber-text": {
+        "role": "secondary",
+        "displayName": "Amber Text",
+        "canonical": "#ffb340",
+        "tonalRamp": [
+          "#4c2e00",
+          "#8a5300",
+          "#c77800",
+          "#ff9c05",
+          "#ffb442",
+          "#ffcc80",
+          "#ffe3b8",
+          "#fff5e5"
+        ]
+      },
+      "amber-text-light": {
+        "role": "secondary",
+        "displayName": "Amber Text (light theme)",
+        "canonical": "#b25000",
+        "tonalRamp": [
+          "#4c2200",
+          "#8a3e00",
+          "#c75900",
+          "#ff7505",
+          "#ff9742",
+          "#ffb980",
+          "#ffd8b8",
+          "#fff1e5"
+        ]
+      },
+      "amber-tile": {
+        "role": "secondary",
+        "displayName": "Amber Tile",
+        "canonical": "#33260f",
+        "tonalRamp": [
+          "#3b2c11",
+          "#6a4f1f",
+          "#9a732d",
+          "#c6953e",
+          "#d4af6d",
+          "#e2c99c",
+          "#efe1c8",
+          "#f9f4eb"
+        ]
+      },
+      "amber-tile-light": {
+        "role": "secondary",
+        "displayName": "Amber Tile (light theme)",
+        "canonical": "#fff3e0",
+        "tonalRamp": [
+          "#4c2f00",
+          "#8a5400",
+          "#c77a00",
+          "#ff9e05",
+          "#ffb642",
+          "#ffce80",
+          "#ffe3b8",
+          "#fff5e5"
+        ]
+      },
+      "red-fill": {
+        "role": "tertiary",
+        "displayName": "Critical Red",
+        "canonical": "#ff453a",
+        "tonalRamp": [
+          "#4c0400",
+          "#8a0800",
+          "#c70b00",
+          "#ff1305",
+          "#ff4d42",
+          "#ff8780",
+          "#ffbcb8",
+          "#ffe7e5"
+        ]
+      },
+      "red-fill-light": {
+        "role": "tertiary",
+        "displayName": "Critical Red (light theme)",
+        "canonical": "#ff3b30",
+        "tonalRamp": [
+          "#4c0400",
+          "#8a0700",
+          "#c70b00",
+          "#ff1205",
+          "#ff4c42",
+          "#ff8680",
+          "#ffbbb8",
+          "#ffe7e5"
+        ]
+      },
+      "red-text": {
+        "role": "tertiary",
+        "displayName": "Red Text",
+        "canonical": "#ff6961",
+        "tonalRamp": [
+          "#4c0400",
+          "#8a0700",
+          "#c70a00",
+          "#ff1205",
+          "#ff4c42",
+          "#ff8680",
+          "#ffbbb8",
+          "#ffe7e5"
+        ]
+      },
+      "red-text-light": {
+        "role": "tertiary",
+        "displayName": "Red Text (light theme)",
+        "canonical": "#c4000f",
+        "tonalRamp": [
+          "#4c0006",
+          "#8a000b",
+          "#c7000f",
+          "#ff0518",
+          "#ff4251",
+          "#ff8089",
+          "#ffb8bd",
+          "#ffe5e7"
+        ]
+      },
+      "red-tile": {
+        "role": "tertiary",
+        "displayName": "Red Tile",
+        "canonical": "#3a1714",
+        "tonalRamp": [
+          "#391714",
+          "#662923",
+          "#943b33",
+          "#bf4f45",
+          "#cf7a73",
+          "#dea5a0",
+          "#edcdca",
+          "#f8edec"
+        ]
+      },
+      "red-tile-light": {
+        "role": "tertiary",
+        "displayName": "Red Tile (light theme)",
+        "canonical": "#ffebe9",
+        "tonalRamp": [
+          "#4c0700",
+          "#8a0d00",
+          "#c71200",
+          "#ff1c05",
+          "#ff5342",
+          "#ff8b80",
+          "#ffbeb8",
+          "#ffe8e5"
+        ]
+      },
+      "focus-blue": {
+        "role": "interaction",
+        "displayName": "Focus Blue",
+        "canonical": "#0a84ff",
+        "tonalRamp": [
+          "#00264c",
+          "#00458a",
+          "#0063c7",
+          "#0582ff",
+          "#42a0ff",
+          "#80bfff",
+          "#b8dbff",
+          "#e5f2ff"
+        ]
+      },
+      "link": {
+        "role": "interaction",
+        "displayName": "Link Blue",
+        "canonical": "#4aa3ff",
+        "tonalRamp": [
+          "#00264c",
+          "#00448a",
+          "#0062c7",
+          "#0580ff",
+          "#429fff",
+          "#80beff",
+          "#b8dbff",
+          "#e5f2ff"
+        ]
+      },
+      "link-light": {
+        "role": "interaction",
+        "displayName": "Link Blue (light theme)",
+        "canonical": "#0060d1",
+        "tonalRamp": [
+          "#00234c",
+          "#003f8a",
+          "#005bc7",
+          "#0578ff",
+          "#4299ff",
+          "#80baff",
+          "#b8d8ff",
+          "#e5f1ff"
+        ]
+      },
+      "pop": {
+        "role": "neutral",
+        "displayName": "Pop",
+        "canonical": "#3a3c3f",
+        "tonalRamp": [
+          "#252628",
+          "#424448",
+          "#5f6368",
+          "#7d8187",
+          "#9da0a5",
+          "#bdbfc2",
+          "#dadbdd",
+          "#f2f2f3"
+        ]
+      },
+      "pop-light": {
+        "role": "neutral",
+        "displayName": "Pop (light theme)",
+        "canonical": "#1d1f21",
+        "tonalRamp": [
+          "#242629",
+          "#404549",
+          "#5d636a",
+          "#7a828a",
+          "#9ba1a7",
+          "#bbbfc3",
+          "#d9dbde",
+          "#f1f2f3"
+        ]
+      },
+      "pop-text": {
+        "role": "neutral",
+        "displayName": "Pop Text",
+        "canonical": "#f2f2f7",
+        "tonalRamp": [
+          "#1d1d2f",
+          "#343455",
+          "#4c4c7b",
+          "#6464a0",
+          "#8a8ab7",
+          "#b0b0ce",
+          "#d3d3e4",
+          "#efeff5"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "The one number a small or wide tile shows."
+      },
+      "figure-large": {
+        "displayName": "Figure Large",
+        "purpose": "The figure in a large tile."
+      },
+      "unit": {
+        "displayName": "Unit",
+        "purpose": "Unit directly after a figure, secondary text."
+      },
+      "statement": {
+        "displayName": "Statement",
+        "purpose": "A sentence standing in for a figure (Needs attention); missing readings at this size in regular weight."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Row names and values in list tiles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Activity rows and the text link."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Tile name with a 14px icon; carries the state colour via accent."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Context under figures, chart axes, list sub-lines."
+      },
+      "tooltip": {
+        "displayName": "Tooltip",
+        "purpose": "Chart readouts."
+      }
+    },
+    "shadows": [
+      {
+        "name": "now-dot-halo",
+        "value": "0 0 0 2px var(--w-tile)",
+        "purpose": "Lifts the sparkline's latest-value dot off its line. Tiles and tooltips take no shadow."
+      }
+    ],
+    "motion": [
+      {
+        "name": "tile-state",
+        "value": "background-color 0.6s cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "A tile easing into or out of its state colour; disabled under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "widgets-4col",
+        "value": "720px (container width)"
+      },
+      {
+        "name": "widgets-6col",
+        "value": "1100px (container width)"
+      },
+      {
+        "name": "page-padding-lg",
+        "value": "1024px (viewport, 16px to 24px side padding)"
+      },
+      {
+        "name": "range-control-inline",
+        "value": "640px (viewport)"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Small Tile",
+      "kind": "card",
+      "refersTo": "tile",
+      "description": "A 1x1 widget: label with icon, one big rounded tabular figure at the bottom, a caption.",
+      "html": "<section class=\"ds-tile\" tabindex=\"0\"><h2 class=\"ds-label\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"2\"/><rect x=\"9\" y=\"9\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2\"/></svg>CPU</h2><div class=\"ds-figure\">23<span class=\"ds-unit\">%</span></div><p class=\"ds-caption\">Load 0.42 · 2 cores</p></section>",
+      "css": ".ds-tile{width:200px;height:168px;display:flex;flex-direction:column;padding:16px 18px;border-radius:22px;background:var(--w-tile,#1d1f21);color:var(--w-text,#f2f2f7);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;overflow:hidden;transition:background-color .6s cubic-bezier(.16,1,.3,1)}.ds-label{display:flex;align-items:center;gap:6px;margin:0;font-size:13px;font-weight:600;color:var(--w-text-2,#aeaeb2)}.ds-figure{margin-top:auto;font-family:ui-rounded,-apple-system,BlinkMacSystemFont,'SF Pro Rounded',system-ui,sans-serif;font-size:44px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.ds-unit{margin-left:3px;font-size:20px;letter-spacing:0;color:var(--w-text-2,#aeaeb2)}.ds-caption{margin:4px 0 0;font-size:13px;line-height:1.35;color:var(--w-text-2,#aeaeb2);font-variant-numeric:tabular-nums}.ds-tile:focus-visible{outline:2px solid var(--w-blue-fill,#0a84ff);outline-offset:2px}"
+    },
+    {
+      "name": "Needs Attention Tile (warning)",
+      "kind": "card",
+      "refersTo": "tile-warn",
+      "description": "The one tile whose whole background changes with state; amber for attention, red for critical.",
+      "html": "<section class=\"ds-tile ds-tile-wide ds-warn\" tabindex=\"0\"><h2 class=\"ds-label\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/></svg>Needs attention</h2><ul class=\"ds-problems\"><li>Disk is 90% full: 23.2 GB left.</li><li>Mom's iPhone hasn't backed up in 9 days.</li></ul></section>",
+      "css": ".ds-tile{width:200px;height:168px;display:flex;flex-direction:column;padding:16px 18px;border-radius:22px;background:var(--w-tile,#1d1f21);color:var(--w-text,#f2f2f7);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;overflow:hidden;transition:background-color .6s cubic-bezier(.16,1,.3,1)}.ds-label{display:flex;align-items:center;gap:6px;margin:0;font-size:13px;font-weight:600;color:var(--w-text-2,#aeaeb2)}.ds-figure{margin-top:auto;font-family:ui-rounded,-apple-system,BlinkMacSystemFont,'SF Pro Rounded',system-ui,sans-serif;font-size:44px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.ds-unit{margin-left:3px;font-size:20px;letter-spacing:0;color:var(--w-text-2,#aeaeb2)}.ds-caption{margin:4px 0 0;font-size:13px;line-height:1.35;color:var(--w-text-2,#aeaeb2);font-variant-numeric:tabular-nums}.ds-tile:focus-visible{outline:2px solid var(--w-blue-fill,#0a84ff);outline-offset:2px}.ds-tile-wide{width:416px}.ds-warn{background:var(--w-amber-tile,#33260f)}.ds-warn .ds-label{color:var(--w-amber,#ffb340)}.ds-problems{margin:auto 0 0;padding:0;list-style:none;font-size:15px;font-weight:600;line-height:1.375}"
+    },
+    {
+      "name": "Needs Attention Tile (critical)",
+      "kind": "card",
+      "refersTo": "tile-crit",
+      "description": "Critical state: the NAS is unreachable or the disk is at 95% or more.",
+      "html": "<section class=\"ds-tile ds-tile-wide ds-crit\" tabindex=\"0\"><h2 class=\"ds-label\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/></svg>Needs attention</h2><p class=\"ds-statement\">Can't reach the NAS. Check that it's on and connected.</p></section>",
+      "css": ".ds-tile{width:200px;height:168px;display:flex;flex-direction:column;padding:16px 18px;border-radius:22px;background:var(--w-tile,#1d1f21);color:var(--w-text,#f2f2f7);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;overflow:hidden;transition:background-color .6s cubic-bezier(.16,1,.3,1)}.ds-label{display:flex;align-items:center;gap:6px;margin:0;font-size:13px;font-weight:600;color:var(--w-text-2,#aeaeb2)}.ds-figure{margin-top:auto;font-family:ui-rounded,-apple-system,BlinkMacSystemFont,'SF Pro Rounded',system-ui,sans-serif;font-size:44px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.ds-unit{margin-left:3px;font-size:20px;letter-spacing:0;color:var(--w-text-2,#aeaeb2)}.ds-caption{margin:4px 0 0;font-size:13px;line-height:1.35;color:var(--w-text-2,#aeaeb2);font-variant-numeric:tabular-nums}.ds-tile:focus-visible{outline:2px solid var(--w-blue-fill,#0a84ff);outline-offset:2px}.ds-tile-wide{width:416px}.ds-crit{background:var(--w-red-tile,#3a1714)}.ds-crit .ds-label{color:var(--w-red,#ff6961)}.ds-statement{margin:auto 0 0;font-size:17px;font-weight:600;line-height:1.375}"
+    },
+    {
+      "name": "Missing Reading",
+      "kind": "card",
+      "refersTo": "tile",
+      "description": "A reading that does not exist is said in words at 17px, never as a number.",
+      "html": "<section class=\"ds-tile\" tabindex=\"0\"><h2 class=\"ds-label\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"2\"/><rect x=\"9\" y=\"9\" width=\"6\" height=\"6\" rx=\"1\"/><path d=\"M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2\"/></svg>CPU</h2><div class=\"ds-figure ds-missing\">Unknown</div><p class=\"ds-caption\">No live reading · history below</p></section>",
+      "css": ".ds-tile{width:200px;height:168px;display:flex;flex-direction:column;padding:16px 18px;border-radius:22px;background:var(--w-tile,#1d1f21);color:var(--w-text,#f2f2f7);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;overflow:hidden;transition:background-color .6s cubic-bezier(.16,1,.3,1)}.ds-label{display:flex;align-items:center;gap:6px;margin:0;font-size:13px;font-weight:600;color:var(--w-text-2,#aeaeb2)}.ds-figure{margin-top:auto;font-family:ui-rounded,-apple-system,BlinkMacSystemFont,'SF Pro Rounded',system-ui,sans-serif;font-size:44px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.ds-unit{margin-left:3px;font-size:20px;letter-spacing:0;color:var(--w-text-2,#aeaeb2)}.ds-caption{margin:4px 0 0;font-size:13px;line-height:1.35;color:var(--w-text-2,#aeaeb2);font-variant-numeric:tabular-nums}.ds-tile:focus-visible{outline:2px solid var(--w-blue-fill,#0a84ff);outline-offset:2px}.ds-missing{font-family:inherit;font-size:17px;letter-spacing:0;color:var(--w-text-2,#aeaeb2)}"
+    },
+    {
+      "name": "Disk Ring",
+      "kind": "custom",
+      "refersTo": "tile",
+      "description": "Large-tile disk ring: state fill on the track, percentage at the centre; label takes the accent colour.",
+      "html": "<section class=\"ds-tile ds-large\" tabindex=\"0\"><h2 class=\"ds-label ds-accent-warn\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 12H2\"/><path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/><path d=\"M6 16h.01M10 16h.01\"/></svg>Disk</h2><div class=\"ds-ringrow\"><div class=\"ds-ring\"><svg viewBox=\"0 0 128 128\" aria-hidden=\"true\"><circle cx=\"64\" cy=\"64\" r=\"52\" fill=\"none\" stroke=\"var(--w-track,#2c2e31)\" stroke-width=\"14\"/><circle cx=\"64\" cy=\"64\" r=\"52\" fill=\"none\" stroke=\"var(--w-amber-fill,#ff9f0a)\" stroke-width=\"14\" stroke-linecap=\"round\" stroke-dasharray=\"294 327\"/></svg><span>90%</span></div><div><div class=\"ds-figure ds-f40\">23.2<span class=\"ds-unit\">GB free</span></div><p class=\"ds-caption\">205 GB of 228 GB used</p></div></div></section>",
+      "css": ".ds-tile{width:200px;height:168px;display:flex;flex-direction:column;padding:16px 18px;border-radius:22px;background:var(--w-tile,#1d1f21);color:var(--w-text,#f2f2f7);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;overflow:hidden;transition:background-color .6s cubic-bezier(.16,1,.3,1)}.ds-label{display:flex;align-items:center;gap:6px;margin:0;font-size:13px;font-weight:600;color:var(--w-text-2,#aeaeb2)}.ds-figure{margin-top:auto;font-family:ui-rounded,-apple-system,BlinkMacSystemFont,'SF Pro Rounded',system-ui,sans-serif;font-size:44px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.ds-unit{margin-left:3px;font-size:20px;letter-spacing:0;color:var(--w-text-2,#aeaeb2)}.ds-caption{margin:4px 0 0;font-size:13px;line-height:1.35;color:var(--w-text-2,#aeaeb2);font-variant-numeric:tabular-nums}.ds-tile:focus-visible{outline:2px solid var(--w-blue-fill,#0a84ff);outline-offset:2px}.ds-large{width:416px;height:352px}.ds-accent-warn{color:var(--w-amber,#ffb340)}.ds-ringrow{flex:1;display:flex;align-items:center;gap:20px}.ds-ring{position:relative;width:136px;height:136px;flex-shrink:0}.ds-ring svg{width:100%;height:100%;transform:rotate(-90deg)}.ds-ring span{position:absolute;inset:0;display:grid;place-items:center;font-size:30px;font-weight:600;font-variant-numeric:tabular-nums}.ds-f40{font-size:40px;margin-top:0}"
+    },
+    {
+      "name": "Chart Tooltip",
+      "kind": "custom",
+      "refersTo": "tooltip",
+      "description": "Readout above a focused or hovered bar or sparkline point; solid Pop, no shadow.",
+      "html": "<div class=\"ds-tip\"><strong>Mon 20 Oct</strong><br>14 files · 3.1 MB<br>9 new, 5 already on the NAS</div>",
+      "css": ".ds-tip{display:inline-block;padding:6px 9px;border-radius:10px;background:var(--w-pop,#3a3c3f);color:var(--w-pop-text,#f2f2f7);font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-size:12px;line-height:1.3;white-space:nowrap}.ds-tip strong{font-weight:600}"
+    },
+    {
+      "name": "Day Bars",
+      "kind": "custom",
+      "refersTo": "tile",
+      "description": "Files per day: muted green bars, today in healthy green, empty days as a track stub; each bar focusable.",
+      "html": "<ol class=\"ds-bars\" aria-label=\"Files backed up per day\"><li tabindex=\"0\" style=\"height:40%\"></li><li tabindex=\"0\" class=\"ds-empty\"></li><li tabindex=\"0\" style=\"height:65%\"></li><li tabindex=\"0\" style=\"height:25%\"></li><li tabindex=\"0\" style=\"height:80%\"></li><li tabindex=\"0\" class=\"ds-today\" style=\"height:100%\"></li></ol>",
+      "css": ".ds-bars{display:flex;align-items:flex-end;gap:3px;height:120px;width:200px;margin:0;padding:0;list-style:none}.ds-bars li{flex:1;border-radius:3px;background:var(--w-green-soft,#2b5236);outline:none}.ds-bars li:hover,.ds-bars li:focus-visible{background:var(--w-green-fill,#34c759);opacity:.75}.ds-bars li:focus-visible{outline:2px solid var(--w-blue-fill,#0a84ff);outline-offset:2px}.ds-bars .ds-today{background:var(--w-green-fill,#34c759)}.ds-bars .ds-empty{height:2px;background:var(--w-track,#2c2e31)}"
+    },
+    {
+      "name": "Device Row",
+      "kind": "custom",
+      "refersTo": "tile",
+      "description": "List row inside a tile; a late device turns its time and caption amber instead of gaining a badge.",
+      "html": "<ul class=\"ds-list\"><li><div><div class=\"ds-t\">Harsh's Mac</div><div class=\"ds-c\">25 files · 5.7 MB</div></div><div class=\"ds-r\"><div class=\"ds-t\">Yesterday 23:03</div><div class=\"ds-c\">Last backup</div></div></li><li class=\"ds-late\"><div><div class=\"ds-t\">Mom's iPhone</div><div class=\"ds-c\">40 files · 7.7 MB</div></div><div class=\"ds-r\"><div class=\"ds-t\">11 Oct</div><div class=\"ds-c\">9 days ago</div></div></li></ul>",
+      "css": ".ds-list{width:340px;margin:0;padding:0;list-style:none;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:var(--w-text,#f2f2f7)}.ds-list li{display:flex;justify-content:space-between;gap:12px;padding:10px 4px;border-bottom:1px solid var(--w-rule,rgba(255,255,255,.08))}.ds-list li:last-child{border-bottom:0}.ds-t{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}.ds-c{font-size:13px;line-height:1.35;color:var(--w-text-2,#aeaeb2)}.ds-r{text-align:right}.ds-late .ds-r .ds-t,.ds-late .ds-r .ds-c{color:var(--w-amber,#ffb340)}"
+    },
+    {
+      "name": "Text Link",
+      "kind": "button",
+      "refersTo": "text-link",
+      "description": "The world's only button form: a semibold blue text action.",
+      "html": "<button class=\"ds-link\">Show older uploads</button>",
+      "css": ".ds-link{background:none;border:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-size:14px;font-weight:600;color:var(--w-link,#4aa3ff);cursor:pointer}.ds-link:hover{opacity:.8}.ds-link:focus-visible{outline:2px solid var(--w-blue-fill,#0a84ff);outline-offset:2px;border-radius:6px}.ds-link:disabled{opacity:.5;cursor:default}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Glance Widgets",
+    "overview": "The NAS is read like a stack of Apple home-screen widgets. Each raised tile answers one question with one large rounded figure that can be read from across the room, a short label above it and a quiet caption below. Detail (exact values, history, per-device numbers) waits behind a hover, focus or tap; it never sits in the way of the figure.\n\nThe world is quiet greyscale on a near-black ground (a light grey ground in the light theme). Colour is not decoration and not category: it says healthy, needs attention or critical, and nothing else. When something is wrong, the place that reports it changes as a whole, the way a widget does, rather than collecting badges.\n\nThe system currently covers the dashboard at `/` and the disk indicator in the sidebar. Library, Finder, Search, Trash, Settings and Sync still render in the incumbent \"Liquid Glass\" shell (translucent blurred panels, Apple Blue accent, `--glass-*` and `--accent*` tokens in `globals.css`), sitting on this world's shared ground. They are the next surfaces to move over; until then the shell's tokens remain in force for them and are not part of this world.",
+    "keyCharacteristics": [
+      "Raised flat tiles in three sizes on a plain ground; no borders, no shadows, no blur.",
+      "One big tabular figure per tile, in the system's rounded face.",
+      "Colour for state only: green, amber, red; everything else greyscale.",
+      "Exactly one tile (Needs attention) changes its whole background with state.",
+      "Missing data is said in words, at a size that cannot pass for a number.",
+      "System fonts only; nothing loads from the internet."
+    ],
+    "rules": [
+      {
+        "name": "The State-Only Rule",
+        "body": "Green, amber and red mean healthy, attention and critical. Categories, series and kinds are told apart in greys (the vault bar is text, Grey 1, Grey 2), never in hues.",
+        "section": "colors"
+      },
+      {
+        "name": "The Grey Line Rule",
+        "body": "Sparklines are drawn in Grey 1 with a soft fade beneath. A metric earns state colour only when it has a threshold; temperature stays grey until the NAS's real sensor range is known.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number that updates (figures, captions, times, sizes) uses tabular numerals so live values do not jitter.",
+        "section": "typography"
+      },
+      {
+        "name": "The Words-Not-Zeros Rule",
+        "body": "A reading that does not exist is said in words (\"Unknown\", \"No data yet\", \"Not measured on this machine\") at the statement size in secondary text, never as a placeholder number.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Stack Rule",
+        "body": "Tiles never take shadows, borders or backdrop blur. Separation comes from the step between ground and tile, nothing else.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do give each tile one question and one figure, with the figure at the tile's bottom edge.",
+      "Do keep sparklines grey and the vault breakdown in greys; spend green, amber and red only on state.",
+      "Do let Needs attention, and only Needs attention, change its whole background (Amber Tile, Red Tile).",
+      "Do report state on other tiles through the label (`accent`) and their own marks (the ring, a late device's time).",
+      "Do say missing readings in words at 17px in secondary text.",
+      "Do use tabular numerals for every live number.",
+      "Do keep blue for focus and links only."
+    ],
+    "donts": [
+      "Don't add shadows, borders or backdrop blur to tiles.",
+      "Don't give a second tile a whole-background state change; that move belongs to Needs attention.",
+      "Don't add badges, pills or dots to signal a problem; change the tile, the label or the value's colour.",
+      "Don't colour categories or data series with hues.",
+      "Don't load fonts from the internet; use the system stack and ui-rounded.",
+      "Don't show a placeholder or estimated number where no reading exists.",
+      "Don't carry the Liquid Glass shell's glass panels, accent gradients, glows or uppercase tracked section labels into surfaces built in this world."
+    ]
+  }
+}
