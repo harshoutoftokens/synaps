@@ -1,3 +1,9 @@
+"""OBSOLETE - do not run on a current database.
+
+Startup (database.init_db) now adds the media_files.source column and fills it itself.
+This script predates the Vault/YYYY/MM layout: it ignores SYNAPS_DB_URL and would set the
+source of canonical vault files to a month number. Kept only for history.
+"""
 import sqlite3
 import os
 import sys

@@ -5,19 +5,59 @@ Versions are grouped by major development milestone rather than individual commi
 
 ---
 
-## Unreleased – Cleanup & continuous deployment
+## Unreleased – Documentation & project layout
+
+### Changed
+- Documentation rewritten from the current code: 13 numbered guides in [`docs/`](docs/README.md), including new guides for storage and ingest, the Mac app and the iPhone app
+- README rewritten
+- One-off maintenance scripts moved from the `backend/` root (and `scripts/`) into [`backend/scripts/`](backend/scripts/README.md); run them as `venv/bin/python scripts/<name>.py` from `backend/`
+- Project notes moved into `docs/project/` (`roadmap.md`, `history.md`, `versioning.md`)
+
+### Removed
+- Outdated docs superseded by the rewrite: the architecture critique (its open items moved to the roadmap), the separate diagrams file (diagrams now live in the guides), and the old future-improvements list
+
+---
+
+## v2.2 – Reliability, Security & Continuous Deployment *(October 13–14, 2026)*
+
+> A full audit of the NAS backend, web dashboard and both apps. The backend could not start from a clean checkout, uploads could write outside the storage folder, and deploys were manual. This release fixes those, adds streaming uploads and a CI/CD pipeline that updates the NAS by itself, and adds two iPhone features.
 
 ### Added
-- `./synaps` — one tool for install, dev, test, update, rollback, deploy, status, logs and doctor
-- GitHub Actions CI (`.github/workflows/ci.yml`): backend tests (Python 3.10/3.12), web lint + static build, deploy-script checks, Mac tests, iOS build
-- NAS auto-update: `synaps-update.timer` deploys new `main` commits after CI passes, with DB backup, health check and automatic rollback
-- `deploy/` templates: systemd units, a narrow sudoers rule, Bonjour (avahi) service for Mac/iPhone discovery
+- **`./synaps`** — one tool for install, dev, test, update, rollback, deploy, status, logs and doctor
+- **CI** (`.github/workflows/ci.yml`): backend tests (Python 3.10 and 3.12), web lint and static build, deploy-script checks, Mac build and tests, iPhone build
+- **NAS auto-update**: `synaps-update.timer` deploys new `main` commits once CI passes, backs up the database, health-checks, and rolls back on failure
+- **`deploy/`** templates: systemd units, a sudoers rule limited to restarting Synaps, avahi so the NAS is reachable as `<hostname>.local` and advertised over Bonjour
+- **Streaming uploads**: `PUT /api/v2/ingest/stream` (raw body, SHA-256 verified, 507 when the disk is nearly full); apps fall back to multipart on older servers
+- **Optional API token** (`SYNAPS_API_TOKEN`) for the API, the web app and both apps
+- **"Already on the NAS" matching**: `POST /api/v2/ingest/match` (file name + size); the iPhone app and the Mac app's iPhone view tick photos that reached the NAS another way, without uploading
+- **iPhone Lock Screen progress** (Live Activity): progress bar with `x/total`, current file, "Your backup is complete" or "Backup paused" with the reason
+- `/api/health` reports the NAS host name (`name`), shown on the Lock Screen instead of its IP
+- Static web mode: the backend serves the exported web app, so no Node.js process runs on the NAS
+
+### Changed
+- SQLite runs in WAL mode with a 30 s busy timeout; extra indexes for timeline paging and duplicate checks
+- Thumbnails: bounded worker queue, faster JPEG decoding, EXIF orientation, video frames via ffmpeg at low priority, failure memory
+- Downloads and media support ETag/304 and HTTP Range; HEIC previews are cached
+- Finder listings are paged and cached; the web grid only renders what is on screen
+- iPhone app: background uploads continue while the app is suspended; Live Photos, videos and edits are exported as separate parts
+- Mac app: new sync engine with streaming uploads, retries and a settings window for the NAS address and token
+
+### Fixed
+- The backend crashed on a fresh checkout because `models_v2.py` and `node_manager.py` had never been committed
+- Upload paths are confined to the storage root (a crafted `original_path` could write outside it)
+- On startup the database gains any column an older schema lacks (the timeline returned 500 on the NAS after deploying)
+- Trash moves stay on the same disk, never overwrite on restore, and refuse app-uploaded (v2) files instead of breaking the vault
+- The scanner refuses to delete most of the catalog when the storage disk is not mounted
+- Search escapes `%` and `_`; settings only accept known keys
 
 ### Removed
 - `setup.sh`, `start.sh`, `start-prod.sh`, `deploy.sh`, `update.sh`, `git_cheatsheet.md` (replaced by `./synaps`)
-- Legacy `clients/mac/synaps_mac.py` CLI (superseded by the Mac app; shared its state DB)
-- Orphaned `tests/test_sync_navigation.swift`, unused `clients/ios/SynapsiOS/Package.swift`
-- Ad-hoc `test_db.py` (root, broken), `backend/test_db.py`, `backend/test_heic.py` (now `./synaps doctor`)
+- Legacy `clients/mac/synaps_mac.py` CLI (superseded by the Mac app; it shared and reset the app's sync state)
+- Orphaned `tests/test_sync_navigation.swift`, unused `clients/ios/SynapsiOS/Package.swift`, ad-hoc `test_db.py` / `test_heic.py` scripts
+
+### Known issues
+- Many files migrated from the old `Vault/Harsh/Iphone` layout have a stored SHA-256 that does not match their content, so hash-based dedup misses them (see [roadmap](docs/project/roadmap.md))
+- Most web-timeline rows on the NAS point at files moved by an earlier restructure; the website is secondary and this is not fixed
 
 ---
 
@@ -34,6 +74,24 @@ Versions are grouped by major development milestone rather than individual commi
 - **Uncommitted Staging Tab** — dedicated overview of pending files with total transfer size and one-tap "Commit All" action
 - **NAS Vault Explorer** — remote directory and file browser directly on iPhone
 - **Local SQLite State Store** — persistent cache for asset hashes and audit logs
+
+---
+
+## v2.0 – Native Mac App & Home Cloud Vault *(September 30 – October 9, 2026)*
+
+> Synaps grew from a web dashboard into a multi-device cloud. A native macOS app syncs Mac folders to the NAS, files are stored once in a content-addressed vault no matter how many devices upload them, and the NAS can be browsed from the Mac like a Finder location.
+
+### Added
+- **SynapsMac** (`clients/mac/SynapsMac`) — SwiftUI app modelled on Finder: icon and list views, Finder-style selection, Quick Look, sorting, kind grouping, monochrome sidebar icons
+- **Folder sync with green ticks** — local files are hashed, checked against the NAS (`/api/v2/ingest/check`) and uploaded only if the NAS doesn't have them; status persists across navigation
+- **Content-addressed vault** — uploads stored once as `Vault/YYYY/MM/<sha16>_<name>`, with per-device hardlink mirrors under `Mirrors/`
+- **Home Cloud browser** — browse NAS folders from the Mac with thumbnails, date sorting and a path bar
+- **iPhone import over USB** into `~/Pictures/Synaps Imports`
+- **Thumbnail pre-generation** — thumbnails queued automatically on upload, plus `preheat_thumbnails.py` for existing files
+- Persistent folder access through security-scoped bookmarks; persistent activity log
+
+### Fixed
+- HEIC and MOV thumbnails, 4K HEVC video frame extraction, NAS connection status, sorting across all pages of a NAS folder
 
 ---
 
@@ -190,4 +248,4 @@ Versions are grouped by major development milestone rather than individual commi
 
 ---
 
-*Versions follow a milestone-based scheme. See [VERSIONING.md](VERSIONING.md) for the full versioning strategy.*
+*Versions follow a milestone-based scheme. See [docs/project/versioning.md](docs/project/versioning.md) for the versioning strategy.*

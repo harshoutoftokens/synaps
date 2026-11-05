@@ -2,7 +2,7 @@
 Synaps Database Setup - SQLite via SQLAlchemy
 """
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
 from config import DATABASE_URL, SQLITE_BUSY_TIMEOUT_MS
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
@@ -59,6 +59,8 @@ EXTRA_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_media_files_file_size ON media_files (file_size)",
     # timeline keyset paging: ORDER BY date_taken, id
     "CREATE INDEX IF NOT EXISTS ix_media_files_date_taken_id ON media_files (date_taken, id)",
+    # stats dashboard: backups per day and recent activity (routers/system.py)
+    "CREATE INDEX IF NOT EXISTS ix_logical_items_imported_at ON logical_items (imported_at)",
 ]
 
 
@@ -97,16 +99,21 @@ def _fill_media_sources(conn):
         "SELECT id, relative_path FROM media_files WHERE source IS NULL"
     ).fetchall()
     if rows:
-        conn.exec_driver_sql(
-            "UPDATE media_files SET source = ? WHERE id = ?",
-            [(derive_source(rel or ""), row_id) for row_id, rel in rows],
-        )
+        # A session on the same connection lets derive_source look up the uploading device of
+        # v2 canonical files (Vault/YYYY/MM/<sha>_name); without it they would get "unknown".
+        session = Session(bind=conn)
+        try:
+            updates = [(derive_source(rel or "", session), row_id) for row_id, rel in rows]
+        finally:
+            session.close()
+        conn.exec_driver_sql("UPDATE media_files SET source = ? WHERE id = ?", updates)
 
 
 def init_db():
     """Create all tables (v1 and v2), add columns missing from older databases, extra indexes."""
     from models import MediaFile, TrashItem, SyncRecord, Setting  # noqa: F401
     import models_v2  # noqa: F401  (registers the v2 tables on Base.metadata)
+    import system_metrics  # noqa: F401  (registers the metrics tables)
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         added = add_missing_columns(conn)

@@ -11,9 +11,13 @@ folder is missing or empty: that is an unmounted disk, not deleted files.
 """
 
 import os
+import sys
 import argparse
 import logging
 from collections import defaultdict
+# Make the backend modules (config, database, ...) importable however this script is started
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from database import SessionLocal
 from models import MediaFile
 from config import EXCLUDED_PATHS, STORAGE_PATH

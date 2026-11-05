@@ -7,10 +7,14 @@ using SHA-256 content hashing. Generates a report in the root directory.
 Does NOT delete or merge any files.
 """
 import os
+import sys
 import time
 import logging
 from collections import defaultdict
 from sqlalchemy.orm import Session
+
+# Make the backend modules (config, database, ...) importable however this script is started
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import SessionLocal
 from models import MediaFile

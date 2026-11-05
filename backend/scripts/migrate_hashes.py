@@ -4,7 +4,11 @@ Synaps Database Migration: Add Content Hash
 """
 import sqlite3
 import os
+import sys
 import logging
+# Make the backend modules (config, database, ...) importable however this script is started
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from config import DATABASE_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

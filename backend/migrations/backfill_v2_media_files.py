@@ -204,7 +204,7 @@ def main():
     if stats["conflicts"]:
         print(f"Batches skipped (concurrent upload): {stats['conflicts']} - run the script again")
     if not args.dry_run and stats["created"]:
-        print("Thumbnails are generated on first view (or run preheat_thumbnails.py).")
+        print("Thumbnails are generated on first view (or run scripts/preheat_thumbnails.py).")
     return 0
 
 

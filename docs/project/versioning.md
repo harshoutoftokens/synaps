@@ -12,6 +12,18 @@ This document defines the versioning scheme for Synaps, explains when to increme
 | `v0.2` | Scanner & NAS Hardening | ✅ Complete |
 | `v0.3` | Import Manager | ✅ Complete |
 | `v0.4` | Media Browser & Source Filters | ✅ Complete |
+| `v0.5` | Apple Photos UI (web) | ✅ Complete |
+| `v2.0` | Native Mac App & Home Cloud Vault | ✅ Complete |
+| `v2.1` | Native iPhone App | ✅ Complete |
+| `v2.2` | Reliability, Security & Continuous Deployment | ✅ Complete |
+
+The web-only milestones planned as `v0.6`–`v1.0` were never tagged: when the native apps and the content-addressed vault arrived (September 2026), the project moved straight to `v2.0`. Open work is tracked in the [roadmap](roadmap.md) and shipped work in the [changelog](../../CHANGELOG.md).
+
+---------|------|--------|
+| `v0.1` | First Working Build | ✅ Complete |
+| `v0.2` | Scanner & NAS Hardening | ✅ Complete |
+| `v0.3` | Import Manager | ✅ Complete |
+| `v0.4` | Media Browser & Source Filters | ✅ Complete |
 | `v0.5` | Apple Photos UI | 🔄 In Progress |
 | `v0.6` | Stability & Bug Fixes | 📋 Planned |
 | `v0.7` | Richer Media Info | 📋 Planned |
@@ -163,9 +175,9 @@ perf: Switch thumbnail queue to LIFO for visible-first ordering
 
 ---
 
-## v1.0 Definition of Done
+## Definition of a stable release
 
-`v1.0` will be tagged when all of the following are true:
+The next release considered "stable for long-term use" should meet all of these:
 
 - [ ] The database schema has been stable for at least one minor version without breaking migrations
 - [ ] `./synaps update` (the auto-update timer) reliably updates the NAS without manual intervention
@@ -174,9 +186,8 @@ perf: Switch thumbnail queue to LIFO for visible-first ordering
 - [ ] The Import Manager has been used for at least 3 full import cycles without data loss
 - [ ] Light and Dark themes are both polished and complete
 - [ ] A `CONTRIBUTING.md` exists (if this ever becomes open-source)
-- [ ] All critical bugs from `docs/15_future_improvements.md` Priority 1 are resolved
+- [ ] The known issues at the top of the [roadmap](roadmap.md) are resolved
 
 ---
 
-*See [CHANGELOG.md](CHANGELOG.md) for the history of what has been shipped.*
-*See [ROADMAP.md](ROADMAP.md) for what's planned.*
+*See the [changelog](../../CHANGELOG.md) for what has shipped and the [roadmap](roadmap.md) for what is planned.*

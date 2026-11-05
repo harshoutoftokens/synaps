@@ -24,11 +24,17 @@ os.environ["SYNAPS_THUMBNAIL_DIR"] = os.path.join(_SESSION_ROOT, "thumbnails")
 os.environ["SYNAPS_TRASH_DIR"] = os.path.join(_SESSION_ROOT, "trash")
 # Empty means "auth disabled"; set explicitly so a local .env can't enable it.
 os.environ["SYNAPS_API_TOKEN"] = ""
+# No background metrics sampler: tests write their own samples (test_system_metrics.py).
+os.environ["SYNAPS_METRICS_INTERVAL"] = "0"
 for _sub in ("storage", "thumbnails", "trash"):
     os.makedirs(os.path.join(_SESSION_ROOT, _sub), exist_ok=True)
 
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
+# maintenance scripts (backend/scripts/) are imported by name in the tests
+SCRIPTS_DIR = os.path.join(BACKEND_DIR, "scripts")
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
 
 
 def pytest_sessionfinish(session, exitstatus):

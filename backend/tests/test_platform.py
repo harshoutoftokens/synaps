@@ -332,3 +332,29 @@ def test_health_reports_the_nas_host_name(client):
     body = client.get("/api/health").json()
     assert body["status"] == "ok"
     assert body["name"] == socket.gethostname().split(".")[0]
+
+
+def test_fill_media_sources_resolves_v2_canonical_files_to_their_device(tmp_path):
+    """App uploads (Vault/YYYY/MM/<sha>_name) get the uploading device's source, not "unknown"."""
+    from sqlalchemy import create_engine
+    import database
+    from routers.ingest_v2 import v1_source_key
+
+    eng = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with eng.begin() as conn:
+        for sql in (
+            "CREATE TABLE sources (id VARCHAR PRIMARY KEY, platform VARCHAR)",
+            "CREATE TABLE physical_objects (id VARCHAR PRIMARY KEY, physical_path VARCHAR)",
+            "CREATE TABLE logical_items (id VARCHAR PRIMARY KEY, physical_object_id VARCHAR, source_id VARCHAR, imported_at DATETIME)",
+            "CREATE TABLE media_files (id INTEGER PRIMARY KEY, relative_path VARCHAR, source VARCHAR)",
+            "INSERT INTO sources VALUES ('iphone_harsh', 'iOS')",
+            "INSERT INTO physical_objects VALUES ('p1', 'Vault/2026/10/0123456789abcdef_IMG_1.HEIC')",
+            "INSERT INTO logical_items VALUES ('l1', 'p1', 'iphone_harsh', '2026-10-01 10:00:00')",
+            "INSERT INTO media_files (id, relative_path) VALUES (1, 'Vault/2026/10/0123456789abcdef_IMG_1.HEIC')",
+        ):
+            conn.exec_driver_sql(sql)
+    with eng.begin() as conn:
+        database._fill_media_sources(conn)
+        source = conn.exec_driver_sql("SELECT source FROM media_files WHERE id = 1").scalar()
+    assert source == v1_source_key("iphone_harsh", "iOS")
+    assert source != "unknown"
