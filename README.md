@@ -139,7 +139,7 @@ cd ~/nas_dashboard
 
 After that, deploying is merging to `main`:
 
-1. Every push and pull request runs [CI](.github/workflows/ci.yml): backend tests, web build, Mac tests and the iPhone build.
+1. Every pull request and every push to `main` runs [CI](.github/workflows/ci.yml): backend tests, a lint and static build of the web app, checks on the deploy tooling, and builds of the Mac and iPhone apps.
 2. Every 5 minutes the NAS checks `main`. It deploys a new commit only after CI has passed, rebuilds only what changed, backs up the database, restarts, and health-checks.
 3. If anything fails, the NAS rolls back automatically and skips that commit until a newer one lands.
 
