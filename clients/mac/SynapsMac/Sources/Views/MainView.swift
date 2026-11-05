@@ -12,6 +12,8 @@ public struct MainView: View {
     public var body: some View {
         NavigationSplitView {
             SidebarView(viewModel: viewModel)
+                // Cap the sidebar so dragging it can't squeeze the content area until it breaks
+                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
         } detail: {
             VStack(spacing: 0) {
                 // Main Content View
@@ -52,6 +54,8 @@ public struct MainView: View {
                 // Bottom Sync Status & Action Bar
                 SyncStatusBar(viewModel: viewModel, isGridMode: displayMode == .grid || viewModel.selectedSidebarItem?.isPhone == true)
             }
+            .frame(minWidth: 580)
+            .softTopScrollEdge()
             .navigationTitle(viewModel.selectedSidebarItem?.title ?? "Synaps")
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
@@ -177,5 +181,40 @@ public struct MainView: View {
         case .size: return "Largest First"
         case .kind: return "Folders Last (Z to A)"
         }
+    }
+}
+
+private extension View {
+    /// Fades content into the toolbar as it scrolls under it, instead of macOS 26's default hard
+    /// edge (a solid band with a dividing line). Earlier macOS versions keep their standard look.
+    /// The API needs the macOS 26 SDK (Swift 6.2+), so older toolchains such as CI's Xcode 16 skip it.
+    @ViewBuilder
+    func softTopScrollEdge() -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            self
+                .background { ToolbarScrollEdgeAnchor() }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
+/// An empty list kept behind the detail content. On macOS 26 the toolbar keeps its soft edge only
+/// while a list-backed scroll view sits under it. On a page without one (an empty or loading folder,
+/// Home Cloud offline, no iPhone) AppKit switches to the hard edge, and it stays hard, even in icon
+/// view, until a list shows again. With this list always there, every page keeps the soft edge.
+/// It has no rows, draws nothing and ignores clicks.
+@available(macOS 26.0, *)
+private struct ToolbarScrollEdgeAnchor: View {
+    var body: some View {
+        List {}
+            .scrollContentBackground(.hidden)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }

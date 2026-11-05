@@ -139,6 +139,22 @@ public struct SyncStatusBar: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
+
+                    // Cancel Sync Button
+                    Button(role: .cancel) {
+                        viewModel.cancelSync()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "stop.circle.fill")
+                            Text("Cancel")
+                                .fontWeight(.medium)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
+                    .fixedSize()
+                    .help("Stop syncing. Files already committed stay on the NAS")
                 }
             }
             
