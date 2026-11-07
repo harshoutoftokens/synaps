@@ -74,6 +74,7 @@ The full picture is in the [overview](docs/01-overview.md) and the [storage and 
 **Mac app**
 - Finder-like icon and list views, selection, sorting, kind grouping and Quick Look
 - Green ticks for files already on the NAS, and one-click sync for the rest
+- Cancel a running sync from the status bar
 - "Home Cloud": browse the NAS with thumbnails
 - Import photos from an iPhone connected over USB
 
@@ -82,6 +83,7 @@ The full picture is in the [overview](docs/01-overview.md) and the [storage and 
 - Fast thumbnails (WebP) for photos, HEIC and video, generated in a bounded background queue
 - Downloads with HTTP Range support (video seeking) and caching
 - Optional API token; uploads confined to the storage folder; SQLite in WAL mode
+- System stats under `/api/system`: CPU, memory, temperature, network and disk sampled once a minute (history from the last hour to the last 30 days), plus backups per day and per device
 
 **Web dashboard**
 - Timeline, folder browser, search, trash and settings; served by the backend as static files, so the NAS doesn't run Node.js
